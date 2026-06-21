@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { runChatModel } from "../ai/run-chat";
+import { sendChatTurn } from "../services/chat-service";
 import type { WorkerEnv } from "../types/env";
 import { parseChatRequest } from "../validation/parse-chat-request";
 
@@ -19,16 +19,14 @@ chatRoutes.post("/chat", async (context) => {
     return context.json({ error: parsed.error }, 400);
   }
 
-  const { messages } = parsed.value;
-  // projectId and branchId are normalized in parseChatRequest for future branch-scoped context.
-
   try {
-    const reply = await runChatModel(context.env, messages);
-    return context.json({ reply });
+    const result = await sendChatTurn(context.env, parsed.value);
+    return context.json(result);
   } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : "Failed to generate a response.";
-    return context.json({ error: errorMessage }, 500);
+    const status = errorMessage.includes("not found") ? 404 : 500;
+    return context.json({ error: errorMessage }, status);
   }
 });
 

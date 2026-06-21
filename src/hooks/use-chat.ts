@@ -1,21 +1,12 @@
-import { useCallback, useState } from "react";
-import { sendChatRequest, toChatMessageInputs } from "../api/chat-client";
-import {
-  DEFAULT_BRANCH_ID,
-  DEFAULT_PROJECT_ID,
-  type ChatMessage,
-} from "../types/message";
+import { useCallback, useEffect, useState } from "react";
+import { sendChatRequest } from "../api/chat-client";
+import type { ChatMessage } from "../types/message";
 
-function createMessage(role: ChatMessage["role"], content: string): ChatMessage {
-  return {
-    id: crypto.randomUUID(),
-    projectId: DEFAULT_PROJECT_ID,
-    branchId: DEFAULT_BRANCH_ID,
-    role,
-    content,
-    createdAt: new Date().toISOString(),
-  };
-}
+type UseChatOptions = {
+  projectId: string;
+  branchId: string;
+  initialMessages: ChatMessage[];
+};
 
 type UseChatResult = {
   messages: ChatMessage[];
@@ -26,13 +17,20 @@ type UseChatResult = {
 };
 
 /**
- * Manages in-memory chat state for a single conversation.
- * Sends full message history to the API using the shared ChatRequest shape.
+ * Manages chat state backed by D1 through the chat API.
  */
-export function useChat(): UseChatResult {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+export function useChat({
+  projectId,
+  branchId,
+  initialMessages,
+}: UseChatOptions): UseChatResult {
+  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setMessages(initialMessages);
+  }, [projectId, branchId, initialMessages]);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -41,21 +39,20 @@ export function useChat(): UseChatResult {
         return;
       }
 
-      const userMessage = createMessage("user", trimmed);
-      const nextMessages = [...messages, userMessage];
-
-      setMessages(nextMessages);
       setIsLoading(true);
       setError(null);
 
       try {
-        const reply = await sendChatRequest({
-          messages: toChatMessageInputs(nextMessages),
-          projectId: DEFAULT_PROJECT_ID,
-          branchId: DEFAULT_BRANCH_ID,
+        const result = await sendChatRequest({
+          projectId,
+          branchId,
+          content: trimmed,
         });
-        const assistantMessage = createMessage("assistant", reply);
-        setMessages((current) => [...current, assistantMessage]);
+        setMessages((current) => [
+          ...current,
+          result.userMessage,
+          result.assistantMessage,
+        ]);
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "Something went wrong.";
@@ -64,7 +61,7 @@ export function useChat(): UseChatResult {
         setIsLoading(false);
       }
     },
-    [isLoading, messages],
+    [branchId, isLoading, projectId],
   );
 
   const clearError = useCallback(() => {

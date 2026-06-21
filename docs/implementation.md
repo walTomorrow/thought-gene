@@ -8,40 +8,41 @@ This document is the canonical engineering guide for Thought Gene. It explains w
 
 ### Current branch
 
-`feature/project-chat`
+`feature/project-foundation`
 
 ### Current milestone
 
-**Chat interface foundation** — a minimal end-to-end chat that sends a user message to Cloudflare Workers AI and displays the assistant reply.
+**Project chat foundation** — persistent default project, main branch, and messages in Cloudflare D1.
 
-**Status:** The local end-to-end chat loop is verified working (`pnpm dev` → browser → `POST /api/chat` → Workers AI → assistant reply).
+**Status:** **Verified locally.** D1 schema, workspace bootstrap, and persisted chat work end-to-end: `pnpm dev` → `GET /api/workspace` → chat → browser refresh reloads history from D1. Manual D1 row counts matched expected message totals.
 
 ### Current goals
 
-- Provide a simple, understandable chat UI
-- Route chat requests through a Cloudflare Worker API
-- Call one Workers AI model per message
-- Keep code modular so projects, branches, and memory can be added later
+- Store projects, branches, and messages in D1
+- Auto-create a default project with a Main branch
+- Load persisted messages on app start
+- Persist each chat turn (user + assistant) through the Worker
+- Keep chat UI presentational and modular for future branch UI
 
 ### Completed work
 
 - pnpm + Vite + React + TypeScript scaffold
 - Modular chat UI (message list, input, loading/error states)
-- Hono Worker with `POST /api/chat`
+- Hono Worker with `GET /api/workspace` and `POST /api/chat`
 - Workers AI integration via `[ai]` binding
-- Message-oriented `POST /api/chat` API shape with placeholder project/branch IDs
-- Shared types in `shared/chat.ts` (frontend + Worker aligned)
-- Environment variable examples and `.gitignore`
-- Local development workflow documented below
-- Workers AI model updated after Cloudflare deprecated `@cf/meta/llama-3.1-8b-instruct` (see Workers AI Model Configuration)
-- Local end-to-end chat verified with `@cf/meta/llama-3.1-8b-instruct-fast`
+- Cloudflare D1 binding with migrations for `projects`, `branches`, `messages`
+- Default project + Main branch get-or-create on workspace load
+- Message persistence and reload on browser refresh
+- Shared types in `shared/chat.ts` and `shared/workspace.ts`
+- DB access modules, services, and route separation
+- Workers AI model: `@cf/meta/llama-3.1-8b-instruct-fast`
+- **Local verification (2026):** Default Project + Main branch load in UI; messages persist across refresh; D1 `COUNT(*)` matched UI message count
 
 ### Remaining work (future branches)
 
-- Projects and main branch creation
-- Branch creation, switching, and closure
-- Artifact extraction and project memory
-- Message persistence (D1)
+- Multiple project UI and project creation flows
+- Branch creation, switching, and closure UI
+- Artifact extraction and project memory dashboard
 - Markdown rendering and streaming responses
 - Authentication and deployment hardening
 
@@ -52,108 +53,138 @@ This document is the canonical engineering guide for Thought Gene. It explains w
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │                        Browser (React)                       │
-│  ChatPanel → useChat → chat-client → fetch("/api/chat")      │
+│  useWorkspace → GET /api/workspace                           │
+│  ChatPanel → useChat → POST /api/chat                        │
 └─────────────────────────────┬───────────────────────────────┘
-                              │ HTTP POST JSON
+                              │ HTTP JSON
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │              Cloudflare Worker (Hono) — worker/src/          │
-│  app.ts → routes/chat.ts → ai/run-chat.ts                   │
+│  routes/ → services/ → db/ → D1                              │
+│  routes/ → services/ → ai/run-chat.ts → Workers AI           │
 └─────────────────────────────┬───────────────────────────────┘
-                              │ env.AI.run(model, messages)
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   Cloudflare Workers AI                      │
-│              (default: @cf/meta/llama-3.1-8b-instruct-fast)   │
-└─────────────────────────────────────────────────────────────┘
+                              │
+              ┌───────────────┴───────────────┐
+              ▼                               ▼
+┌──────────────────────────┐    ┌─────────────────────────────┐
+│     Cloudflare D1        │    │    Cloudflare Workers AI     │
+│  projects, branches,     │    │  @cf/meta/llama-3.1-8b-      │
+│  messages                │    │  instruct-fast               │
+└──────────────────────────┘    └─────────────────────────────┘
 ```
 
 Static assets (HTML, JS, CSS) are built by Vite and served through Cloudflare Assets. API routes matching `/api/*` are handled by the Worker first (`run_worker_first` in `wrangler.toml`).
 
 ### Frontend responsibilities
 
-- Render chat UI and manage in-memory message state
-- Send user messages to `/api/chat`
-- Show loading and error states
-- Stay free of Workers AI or Cloudflare-specific logic
+- Load workspace on mount (`useWorkspace`)
+- Render chat UI and manage in-session message state (`useChat`)
+- Send new user turns to `POST /api/chat` with real `projectId` / `branchId`
+- Show loading and error states for workspace and chat
+- Stay free of Workers AI, D1, or SQL logic
 
 ### Backend responsibilities
 
-- Validate incoming chat requests (`parseChatRequest`)
-- Call Workers AI through the `AI` binding with the full message list
-- Return JSON `{ reply }` or `{ error }`
+- Bootstrap default project + Main branch (`GET /api/workspace`)
+- Validate chat requests (`parseChatRequest`)
+- Persist messages to D1, load branch history for AI context
+- Call Workers AI through the `AI` binding
+- Return JSON workspace or chat turn responses
 
 ### Cloudflare responsibilities
 
 - Run the Worker at the edge
 - Provide the Workers AI binding (no API token in Worker code)
+- Provide D1 for relational storage
 - Serve the built React SPA as static assets
 
 ### Data flow
 
-1. User types a message and clicks Send (or presses Enter).
-2. `useChat` adds a user message to local state and calls `sendChatRequest`.
-3. `chat-client.ts` sends `POST /api/chat` with a `ChatRequest` body (see below).
-4. `parseChatRequest` validates the body and normalizes placeholder IDs.
-5. `runChatModel` invokes `env.AI.run` with the full `messages` array.
-6. Worker returns `{ reply: string }`.
-7. `useChat` appends an assistant message to local state.
+**App startup**
+
+1. `useWorkspace` calls `GET /api/workspace`.
+2. Worker get-or-creates **Default Project** and **Main** branch in D1.
+3. Worker loads all messages for the main branch.
+4. UI renders chat with persisted history.
+
+**Send message**
+
+1. User types a message and clicks Send.
+2. `useChat` calls `POST /api/chat` with `{ projectId, branchId, content }`.
+3. Worker validates project/branch, inserts user message into D1.
+4. Worker loads full branch history from D1.
+5. `runChatModel` calls Workers AI with stored history.
+6. Worker inserts assistant message into D1.
+7. Worker returns `{ reply, userMessage, assistantMessage }`.
+8. UI appends both persisted messages.
+
+**Refresh:** Step 1 reloads messages from D1 — conversation is preserved.
 
 ---
 
 ## Chat API Contract
 
-### Request: `POST /api/chat`
+### `GET /api/workspace`
+
+Returns the default project, its Main branch, and all persisted messages.
 
 ```ts
-type ChatMessageInput = {
-  role: "user" | "assistant" | "system";
+type WorkspaceResponse = {
+  project: ProjectRecord;
+  branch: BranchRecord;
+  messages: StoredMessage[];
+};
+```
+
+On first access, creates **Default Project** and a **Main** branch if they do not exist.
+
+### `POST /api/chat`
+
+D1 is the source of truth for history. The client sends **one new user message** per request.
+
+**Request:**
+
+```ts
+type ChatRequest = {
+  projectId: string;
+  branchId: string;
   content: string;
 };
-
-type ChatRequest = {
-  messages: ChatMessageInput[];
-  projectId?: string;
-  branchId?: string;
-};
 ```
 
-### Response
+**Response:**
 
 ```ts
-type ChatResponse = {
-  reply: string;
+type StoredMessage = {
+  id: string;
+  projectId: string;
+  branchId: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  createdAt: string;
 };
 
-type ChatErrorResponse = {
-  error: string;
+type ChatResponse = {
+  reply: string;
+  userMessage: StoredMessage;
+  assistantMessage: StoredMessage;
 };
 ```
 
-### Why `messages[]` instead of a single `message` string
+### Why the client no longer sends `messages[]`
 
-The first version sent `{ message: string }`, which only supports stateless one-shot prompts. Real conversations (and the MVP) need **multi-turn context** within a branch.
+The previous API accepted full client history. With D1 persistence, the server loads history from the database to avoid drift, duplicate IDs, and tampering. The client receives server-generated message IDs after each turn.
 
-Using `messages[]` now means:
+### Default project and Main branch
 
-- The frontend can send conversation history without an API redesign later.
-- The Worker can pass the same array to Workers AI (`env.AI.run(model, { messages })`).
-- Optional `projectId` / `branchId` can scope requests once projects and branches exist — the route already normalizes them via `DEFAULT_PROJECT_ID` and `DEFAULT_BRANCH_ID`.
+| Entity | Default | How created |
+|--------|---------|-------------|
+| Project | name: `"Default Project"` | `getOrCreateDefaultProject()` on workspace load |
+| Branch | title: `"Main"`, purpose: `"Main project conversation"`, status: `"active"` | `getOrCreateMainBranch()` for that project |
 
-The response stays `{ reply: string }` for now. Streaming can add a separate endpoint or content negotiation later without breaking this shape.
+Real UUIDs are generated in the Worker. No hardcoded placeholder IDs at runtime.
 
-### Placeholder project and branch assumptions
-
-There is still **one implicit conversation**. No project or branch UI exists.
-
-| Constant | Value | Meaning |
-|----------|-------|---------|
-| `DEFAULT_PROJECT_ID` | `"default-project"` | Stand-in until project creation |
-| `DEFAULT_BRANCH_ID` | `"main"` | Stand-in for the auto-created main branch |
-
-The frontend attaches these IDs to every `ChatMessage` and every `ChatRequest`. The Worker defaults missing optional IDs to the same values in `parseChatRequest`. IDs are **not** used for AI context, persistence, or routing yet.
-
-Shared definitions live in `shared/chat.ts` so frontend and Worker stay aligned.
+Shared definitions: `shared/workspace.ts`, `shared/chat.ts`.
 
 ---
 
@@ -177,7 +208,17 @@ Shared definitions live in `shared/chat.ts` so frontend and Worker stay aligned.
 
 **Problem it solves:** Safer refactors as projects/branches/artifacts are added.
 
-**Interaction:** Three tsconfig projects — app (`src/`), Node tooling (`vite.config.ts`), Worker (`worker/`).
+**Interaction:** Three tsconfig projects — app (`src/`), Node tooling (`vite.config.ts`), Worker (`worker/`). Shared types in `shared/`.
+
+### Cloudflare D1
+
+**What:** Serverless SQLite at the edge, bound to Workers.
+
+**Why chosen:** MVP target storage for projects, branches, and messages.
+
+**Problem it solves:** Persistent chat history and future project memory without operating a separate database.
+
+**Interaction:** `env.DB` binding; SQL in `worker/src/db/`; migrations in `migrations/`.
 
 ### Vite
 
@@ -197,13 +238,13 @@ Shared definitions live in `shared/chat.ts` so frontend and Worker stay aligned.
 
 **Problem it solves:** Composable chat UI that can grow with branch switchers and memory sidebars.
 
-**Interaction:** `App.tsx` renders `ChatPanel`; state lives in `useChat` hook.
+**Interaction:** `App.tsx` uses `useWorkspace` + `ChatPanel`; chat state in `useChat`.
 
 ### Cloudflare Workers
 
 **What:** Serverless JavaScript/Wasm runtime at Cloudflare's edge.
 
-**Why chosen:** MVP target platform; pairs with Workers AI and future D1 storage.
+**Why chosen:** MVP target platform; pairs with Workers AI and D1 storage.
 
 **Problem it solves:** Single deployment target for API + static assets.
 
@@ -217,7 +258,7 @@ Shared definitions live in `shared/chat.ts` so frontend and Worker stay aligned.
 
 **Problem it solves:** Structured routing without Express-style weight.
 
-**Interaction:** `worker/src/app.ts` mounts `/api/chat`; routes stay in separate files under `worker/src/routes/`.
+**Interaction:** `worker/src/app.ts` mounts `/api/workspace` and `/api/chat`.
 
 ### Workers AI
 
@@ -301,10 +342,12 @@ Cloudflare periodically **deprecates and replaces** Workers AI models. Model IDs
 
 1. Install dependencies: `pnpm install`
 2. Log in to Cloudflare: `pnpm wrangler login`
-3. Set `account_id` in `wrangler.toml` (see Environment Variables)
-4. Optionally copy `.dev.vars.example` → `.dev.vars` to override the model
-5. Start dev server: `pnpm dev`
-6. Open the URL Vite prints (typically `http://localhost:5173`)
+3. Set `account_id` in `wrangler.toml` (quoted string)
+4. Create D1 database: `pnpm wrangler d1 create thought-gene-db` and set `database_id` in `wrangler.toml`
+5. Apply local migrations: `pnpm db:migrate:local`
+6. Optionally copy `.dev.vars.example` → `.dev.vars` to override the AI model
+7. Start dev server: `pnpm dev`
+8. Open the URL Vite prints (typically `http://localhost:5173`)
 
 One command runs both the React dev server and the Worker in the Workers runtime via `@cloudflare/vite-plugin`.
 
@@ -320,21 +363,94 @@ One command runs both the React dev server and the Worker in the Workers runtime
 
 ### How Wrangler is used
 
-- Reads `wrangler.toml` for Worker name, AI binding, assets config, and vars
+- Reads `wrangler.toml` for Worker name, AI binding, D1 binding, assets config, and vars
 - Loads `.dev.vars` for local secret/var overrides
 - Used directly for login; invoked by the Vite plugin during dev and build
 
-### Request flow (browser → AI model)
+### Request flow (browser → D1 → AI)
 
 ```text
-Browser POST /api/chat
-  → Cloudflare Assets routing (run_worker_first for /api/*)
-  → Hono POST /api/chat
-  → parseChatRequest(body)
-  → runChatModel(env, messages)
-  → env.AI.run(CLOUDFLARE_AI_MODEL, { messages })
-  → JSON { reply } back to browser
+GET /api/workspace
+  → workspace-service → db/projects, db/branches, db/messages → D1
+
+POST /api/chat
+  → parseChatRequest
+  → chat-service → insert user message → D1
+  → load branch history → D1
+  → runChatModel → Workers AI
+  → insert assistant message → D1
+  → JSON { reply, userMessage, assistantMessage }
 ```
+
+---
+
+## D1 Database
+
+### Schema
+
+Defined in `migrations/0001_initial.sql`:
+
+| Table | Purpose |
+|-------|---------|
+| `projects` | Top-level workspace container |
+| `branches` | Conversational workspaces (Main branch created automatically) |
+| `messages` | Chat messages scoped to a branch |
+
+Columns align with MVP types (`docs/mvp.md`). Branch lifecycle columns (`status`, `closure_summary`, etc.) exist but are unused until branch closure is built.
+
+### D1 setup (required before first `pnpm dev`)
+
+**1. Create the remote D1 database (one-time):**
+
+```powershell
+pnpm wrangler d1 create thought-gene-db
+```
+
+Copy the `database_id` UUID from the output.
+
+**2. Update `wrangler.toml`:**
+
+Replace `REPLACE_WITH_DATABASE_ID` with your UUID:
+
+```toml
+[[d1_databases]]
+binding = "DB"
+database_name = "thought-gene-db"
+database_id = "your-uuid-here"
+migrations_dir = "migrations"
+```
+
+**3. Apply migrations locally:**
+
+```powershell
+pnpm db:migrate:local
+```
+
+This creates tables in `.wrangler/state/v3/d1/` for local development.
+
+**4. (Optional) Apply migrations to remote before deploy:**
+
+```powershell
+pnpm db:migrate:remote
+```
+
+### Migration workflow
+
+| Command | Purpose |
+|---------|---------|
+| `pnpm db:migrate:local` | Apply pending migrations to local D1 |
+| `pnpm db:migrate:remote` | Apply pending migrations to remote D1 |
+
+Add new SQL files as `migrations/0002_description.sql` — never edit applied migrations.
+
+### Worker layer responsibilities
+
+| Layer | Path | Role |
+|-------|------|------|
+| Routes | `worker/src/routes/` | HTTP only |
+| Services | `worker/src/services/` | Orchestration |
+| DB | `worker/src/db/` | SQL queries only |
+| AI | `worker/src/ai/` | Model calls only |
 
 ---
 
@@ -366,8 +482,10 @@ Workers AI uses the `[ai]` binding — **no `CLOUDFLARE_API_TOKEN` is required**
 pnpm install
 pnpm wrangler login
 
-# Edit wrangler.toml — uncomment and set:
-# account_id = "your_account_id_here"
+# wrangler.toml — set account_id and database_id
+
+pnpm wrangler d1 create thought-gene-db
+pnpm db:migrate:local
 
 # Optional model override:
 copy .dev.vars.example .dev.vars
@@ -375,19 +493,78 @@ copy .dev.vars.example .dev.vars
 pnpm dev
 ```
 
-### Testing the chat endpoint
+### Local testing (verified workflow)
 
-**Browser:** Open the app at `http://localhost:5173`, send a message, and confirm an assistant reply. This end-to-end path is verified working with the current model configuration.
+Use this checklist after setup (see Local setup checklist and D1 Database sections above).
 
-**curl (during `pnpm dev`):**
+**Prerequisites**
+
+- `account_id` and `database_id` set in `wrangler.toml`
+- `pnpm db:migrate:local` completed successfully
+- `pnpm wrangler login` completed
+- `pnpm dev` running
+
+**1. Workspace bootstrap**
+
+- Open `http://localhost:5173`
+- Header should show **Default Project · Main**
+- Empty chat shows “Send a message to start the conversation” (first visit)
+
+Optional API check:
+
+```powershell
+curl http://localhost:5173/api/workspace
+```
+
+Expect JSON with `project`, `branch`, and `messages` arrays. On first load, `messages` is `[]`; after chatting, it contains persisted rows.
+
+**2. Chat + Workers AI**
+
+- Send a user message; confirm an assistant reply appears
+- Send a second message; confirm multi-turn context works (assistant sees prior messages via D1 history)
+
+**3. Persistence across refresh**
+
+- Send one or more messages
+- Hard-refresh the browser (F5 or Ctrl+R)
+- Confirm the same messages reappear without re-sending
+
+**4. D1 row count (optional sanity check)**
+
+Count messages in the **local** D1 database:
+
+```powershell
+pnpm wrangler d1 execute thought-gene-db --local --command "SELECT COUNT(*) AS count FROM messages;"
+```
+
+The count should match the number of messages shown in the UI (user + assistant rows). After *N* successful chat turns, expect **2N** message rows.
+
+To inspect rows:
+
+```powershell
+pnpm wrangler d1 execute thought-gene-db --local --command "SELECT id, role, substr(content, 1, 40) AS preview, created_at FROM messages ORDER BY created_at;"
+```
+
+**5. curl chat turn (optional)**
+
+Use `projectId` and `branchId` from the workspace response:
 
 ```powershell
 curl -X POST http://localhost:5173/api/chat `
   -H "Content-Type: application/json" `
-  -d "{\"messages\":[{\"role\":\"user\",\"content\":\"Say hello in one sentence.\"}],\"projectId\":\"default-project\",\"branchId\":\"main\"}"
+  -d "{\"projectId\":\"YOUR_PROJECT_ID\",\"branchId\":\"YOUR_BRANCH_ID\",\"content\":\"Say hello in one sentence.\"}"
 ```
 
-Expected: `{"reply":"..."}`
+Expected: `{ "reply", "userMessage", "assistantMessage" }` with server-generated message IDs.
+
+**Verified observations (local)**
+
+| Check | Result |
+|-------|--------|
+| Default Project + Main branch in UI | Pass |
+| Messages saved to D1 on send | Pass |
+| Browser refresh preserves history | Pass |
+| D1 `COUNT(*)` matches UI message count | Pass |
 
 ---
 
@@ -395,35 +572,30 @@ Expected: `{"reply":"..."}`
 
 ```text
 thought-gene/
+├── migrations/
+│   └── 0001_initial.sql     # D1 schema: projects, branches, messages
 ├── shared/
-│   └── chat.ts              # Shared API types, constants, role validation
-├── docs/
-│   ├── implementation.md    # This file
-│   ├── mvp.md               # Product definition
-│   └── ...
+│   ├── chat.ts              # Chat API types
+│   └── workspace.ts         # Workspace API types
 ├── worker/src/
-│   ├── index.ts             # Worker export (Hono app)
-│   ├── app.ts               # Hono app, route mounting
-│   ├── routes/chat.ts       # POST /api/chat handler
+│   ├── db/                  # D1 queries (projects, branches, messages)
+│   ├── services/            # workspace-service, chat-service
+│   ├── routes/
+│   │   ├── workspace.ts     # GET /api/workspace
+│   │   └── chat.ts          # POST /api/chat
 │   ├── validation/
-│   │   └── parse-chat-request.ts  # Request validation + ID defaults
-│   ├── ai/run-chat.ts       # Workers AI call + response parsing
-│   └── types/env.ts         # WorkerEnv bindings
+│   ├── ai/run-chat.ts
+│   └── types/env.ts         # WorkerEnv: AI, DB, vars
 ├── src/
-│   ├── App.tsx              # Page shell
-│   ├── api/chat-client.ts   # fetch wrapper for /api/chat
-│   ├── hooks/use-chat.ts    # Chat state (messages, loading, errors)
-│   ├── types/message.ts     # UI ChatMessage (extends shared types)
-│   └── components/chat/     # Presentational UI components
-├── tsconfig.json            # Solution-style root (see below)
-├── tsconfig.app.json        # Frontend + shared
-├── tsconfig.node.json       # Vite config
-├── tsconfig.worker.json     # Worker + shared
-├── wrangler.toml            # Cloudflare Worker + AI binding config
-├── vite.config.ts           # Vite + Cloudflare plugin
-├── package.json             # pnpm scripts and dependencies
-├── .env.example             # Variable reference
-└── .dev.vars.example        # Wrangler local override template
+│   ├── api/
+│   │   ├── workspace-client.ts
+│   │   └── chat-client.ts
+│   ├── hooks/
+│   │   ├── use-workspace.ts
+│   │   └── use-chat.ts
+│   └── components/chat/     # Presentational UI (unchanged pattern)
+├── wrangler.toml            # AI + D1 bindings
+└── package.json             # db:migrate:local / db:migrate:remote scripts
 ```
 
 ### Root configuration files
@@ -467,13 +639,25 @@ Moving these into subfolders would fight tool defaults without a clear maintaina
 
 **Alternatives:** OpenAI/Anthropic REST from the Worker with `CLOUDFLARE_API_TOKEN` or provider keys. Deferred — more secrets and provider lock-in before product validation.
 
-### Decision: Message-oriented API shape early (`messages[]` + optional IDs)
+### Decision: D1 as source of truth for chat history
 
-**Why:** Avoids a breaking API change when adding conversation history, branch context, and persistence. The Worker already forwards `messages` to Workers AI.
+**Why:** Refresh-safe persistence; server loads history for Workers AI; client sends one turn per request with real IDs.
 
-**Alternatives:** Keep `{ message: string }` until branches land. Rejected — would force a coordinated frontend/backend rewrite.
+**Alternatives:** Client-sent `messages[]` without storage. Rejected after persistence milestone.
 
-### Decision: Shared types in `shared/chat.ts`
+### Decision: routes → services → db layering
+
+**Why:** Keeps SQL out of HTTP handlers and AI logic out of DB modules; scales to branch closure and artifacts.
+
+**Alternatives:** SQL inline in routes. Rejected — harder to test and extend.
+
+### Decision: `GET /api/workspace` bootstrap
+
+**Why:** Single endpoint for default project + Main branch + messages without project picker UI.
+
+**Alternatives:** Separate project CRUD endpoints. Deferred — out of scope for this branch.
+
+### Decision: Shared types in `shared/chat.ts` and `shared/workspace.ts`
 
 **Why:** Frontend and Worker compile separately but must agree on request/response shapes. One source of truth reduces drift.
 
@@ -491,17 +675,11 @@ Moving these into subfolders would fight tool defaults without a clear maintaina
 
 **Alternatives:** Single file Worker. Rejected — mixes concerns early.
 
-### Decision: `useChat` hook + `chat-client.ts`
+### Decision: `useWorkspace` + `useChat` hooks
 
-**Why:** Components stay presentational; transport and state are reusable when branches load different message histories.
+**Why:** Workspace bootstrap separated from chat turns; components stay presentational.
 
-**Alternatives:** fetch inside components. Rejected — harder to swap for persistence layer later.
-
-### Decision: In-memory messages only
-
-**Why:** Persistence belongs with D1/project schema in a later branch; avoids premature data model lock-in.
-
-**Alternatives:** localStorage or D1 now. Rejected — out of scope.
+**Alternatives:** fetch inside components. Rejected — harder to maintain.
 
 ### Decision: Plain text bubbles (no markdown library yet)
 
@@ -519,29 +697,29 @@ Moving these into subfolders would fight tool defaults without a clear maintaina
 
 | Limitation | Notes |
 |------------|-------|
-| No persistence | Messages lost on refresh |
-| Placeholder IDs only | `default-project` / `main` — no real project or branch entities |
-| IDs not used server-side yet | `projectId` / `branchId` normalized but not loaded from storage or injected into prompts |
-| Single conversation UI | No branch switcher or project picker |
-| No streaming | Full response returned at once; `{ reply }` response shape |
-| No markdown rendering | Assistant text shown as plain pre-wrapped text |
+| Single default project only | No project picker or multi-project UI |
+| Main branch only in UI | Branches table exists; no create/switch/close UI |
+| All messages loaded at once | No pagination; fine for early chats |
+| No auth | Single shared D1 workspace for all visitors |
+| User message persisted before AI | If AI fails, user message remains in DB without assistant reply |
+| No streaming | Full response returned at once |
+| No markdown rendering | Plain pre-wrapped text |
 | System role not shown | Type supports `system`; UI renders user and assistant only |
-| `account_id` in wrangler.toml | Each developer must set locally |
+| `database_id` setup required | Each developer runs `wrangler d1 create` and migrates locally |
+| `account_id` in wrangler.toml | Each developer sets locally |
 | No automated tests | Manual smoke test only |
-| Error detail from AI | Generic 500 message if model fails |
-| Deprecated model IDs | Cloudflare retires models periodically (e.g. `@cf/meta/llama-3.1-8b-instruct` deprecated 2026-05-30); update `CLOUDFLARE_AI_MODEL` — see Workers AI Model Configuration |
-| `useChat` depends on `messages` in callback | Acceptable for now; branch switch will need load/reset logic |
+| Deprecated model IDs | Update `CLOUDFLARE_AI_MODEL` if Workers AI returns 5028 |
+| Race on first workspace load | Rare duplicate default projects if two tabs bootstrap simultaneously |
 
 ### Future improvements
 
-- D1 message storage keyed by `projectId` / `branchId`
-- Load history via `GET /api/.../messages` instead of only client memory
-- Branch-scoped system prompts using normalized IDs in `runChatModel`
-- Branch switcher in header; `useChat(projectId, branchId)`
-- Streaming via SSE or a separate streaming endpoint
+- Multiple projects and branch switcher UI
+- Branch creation, closure, and artifact extraction
+- Paginated message history
+- Streaming responses
 - Markdown rendering for assistant messages
-- Structured logging and request IDs in Worker
+- Auth and per-user workspaces
 
 ---
 
-*Last updated: Workers AI model documentation and verified local chat on `feature/project-chat`.*
+*Last updated: local D1 persistence verified on `feature/project-foundation`.*

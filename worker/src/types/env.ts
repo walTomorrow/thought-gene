@@ -3,6 +3,7 @@
  */
 export type WorkerEnv = {
   AI: Ai;
+  DB: D1Database;
   CLOUDFLARE_AI_MODEL: string;
 };
 
