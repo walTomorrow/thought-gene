@@ -1,0 +1,19 @@
+name = "thought-gene"
+main = "worker/src/index.ts"
+compatibility_date = "2025-04-01"
+
+# Cloudflare account ID (must be a quoted string in TOML)
+account_id = "fcd5f497b94e30a81bfcf8eafec02a1d"
+
+# Workers AI binding — no API token required in Worker code.
+[ai]
+binding = "AI"
+
+# Default model; override locally via .dev.vars if needed.
+[vars]
+CLOUDFLARE_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast"
+
+# Serve the React SPA for non-API routes. Route /api/* to the Worker first.
+[assets]
+not_found_handling = "single-page-application"
+run_worker_first = [ "/api/*" ]

@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Local secrets and environment overrides (never commit)
+.env
+.env.local
+.dev.vars
+
+# Wrangler local state
+.wrangler/
+
+# Editor and OS files
+.DS_Store
+*.log
