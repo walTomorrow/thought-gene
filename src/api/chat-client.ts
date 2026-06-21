@@ -1,10 +1,10 @@
-import type { ChatMessageInput, ChatRequest, ChatResponse } from "../types/message";
+import type { ChatRequest, ChatResponse, StoredMessage } from "../types/message";
 
 /**
- * Sends a conversation to the backend chat API.
- * Keeps fetch details out of React components so transport can change later.
+ * Sends one new user message for a project branch conversation.
+ * Server loads history from D1 and persists both sides of the turn.
  */
-export async function sendChatRequest(request: ChatRequest): Promise<string> {
+export async function sendChatRequest(request: ChatRequest): Promise<ChatResponse> {
   const response = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -19,12 +19,7 @@ export async function sendChatRequest(request: ChatRequest): Promise<string> {
     throw new Error(errorMessage);
   }
 
-  return (data as ChatResponse).reply;
+  return data as ChatResponse;
 }
 
-/** Maps UI messages to the API input shape (role + content only). */
-export function toChatMessageInputs(
-  messages: Array<{ role: ChatMessageInput["role"]; content: string }>,
-): ChatMessageInput[] {
-  return messages.map(({ role, content }) => ({ role, content }));
-}
+export type { StoredMessage };

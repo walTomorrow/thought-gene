@@ -1,23 +1,11 @@
-import {
-  DEFAULT_BRANCH_ID,
-  DEFAULT_PROJECT_ID,
-  type ChatMessageInput,
-  isMessageRole,
-} from "../../../shared/chat";
-
-export type ParsedChatRequest = {
-  messages: ChatMessageInput[];
-  projectId: string;
-  branchId: string;
-};
+import type { ChatRequest } from "../../../shared/chat";
 
 type ParseResult =
-  | { ok: true; value: ParsedChatRequest }
+  | { ok: true; value: ChatRequest }
   | { ok: false; error: string };
 
 /**
- * Validates and normalizes an incoming chat request body.
- * Keeps HTTP handlers thin and centralizes request-shape rules.
+ * Validates a chat turn request: project, branch, and new user content.
  */
 export function parseChatRequest(body: unknown): ParseResult {
   if (!body || typeof body !== "object") {
@@ -26,45 +14,24 @@ export function parseChatRequest(body: unknown): ParseResult {
 
   const record = body as Record<string, unknown>;
 
-  if (!Array.isArray(record.messages) || record.messages.length === 0) {
-    return { ok: false, error: "At least one message is required." };
+  if (typeof record.projectId !== "string" || !record.projectId.trim()) {
+    return { ok: false, error: "projectId is required." };
   }
 
-  const messages: ChatMessageInput[] = [];
-
-  for (const item of record.messages) {
-    if (!item || typeof item !== "object") {
-      return { ok: false, error: "Each message must be an object." };
-    }
-
-    const message = item as Record<string, unknown>;
-
-    if (typeof message.role !== "string" || !isMessageRole(message.role)) {
-      return {
-        ok: false,
-        error: 'Each message must have role "user", "assistant", or "system".',
-      };
-    }
-
-    if (typeof message.content !== "string" || !message.content.trim()) {
-      return { ok: false, error: "Each message must have non-empty content." };
-    }
-
-    messages.push({ role: message.role, content: message.content.trim() });
+  if (typeof record.branchId !== "string" || !record.branchId.trim()) {
+    return { ok: false, error: "branchId is required." };
   }
 
-  const projectId =
-    typeof record.projectId === "string" && record.projectId.trim()
-      ? record.projectId.trim()
-      : DEFAULT_PROJECT_ID;
-
-  const branchId =
-    typeof record.branchId === "string" && record.branchId.trim()
-      ? record.branchId.trim()
-      : DEFAULT_BRANCH_ID;
+  if (typeof record.content !== "string" || !record.content.trim()) {
+    return { ok: false, error: "content is required." };
+  }
 
   return {
     ok: true,
-    value: { messages, projectId, branchId },
+    value: {
+      projectId: record.projectId.trim(),
+      branchId: record.branchId.trim(),
+      content: record.content.trim(),
+    },
   };
 }

@@ -197,3 +197,37 @@ textarea:disabled {
   color: #fafafa;
   cursor: pointer;
 }
+
+.workspace-status {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+  color: #71717a;
+}
+
+.workspace-status-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.workspace-status-error p {
+  margin: 0;
+  width: 100%;
+}
+
+.workspace-status-error button {
+  border: 1px solid #fca5a5;
+  background: #ffffff;
+  color: #991b1b;
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.75rem;
+  cursor: pointer;
+}

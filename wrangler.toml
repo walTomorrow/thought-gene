@@ -17,3 +17,12 @@ CLOUDFLARE_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast"
 [assets]
 not_found_handling = "single-page-application"
 run_worker_first = [ "/api/*" ]
+
+# D1 database for projects, branches, and messages.
+# Run: pnpm wrangler d1 create thought-gene-db
+# Then replace database_id below with the UUID from that command.
+[[d1_databases]]
+binding = "DB"
+database_name = "thought-gene-db"
+database_id = "911de055-33a6-467f-b57e-71b5be37de64"
+migrations_dir = "migrations"

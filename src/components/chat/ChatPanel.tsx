@@ -1,14 +1,24 @@
 import { useChat } from "../../hooks/use-chat";
+import type { ChatMessage } from "../../types/message";
 import { ChatInput } from "./ChatInput";
 import { ChatStatus } from "./ChatStatus";
 import { MessageList } from "./MessageList";
 
+type ChatPanelProps = {
+  projectId: string;
+  branchId: string;
+  initialMessages: ChatMessage[];
+};
+
 /**
  * Composes the chat UI: message history, status, and input.
- * This is the main extension point for future branch/project UI.
  */
-export function ChatPanel() {
-  const { messages, isLoading, error, sendMessage, clearError } = useChat();
+export function ChatPanel({ projectId, branchId, initialMessages }: ChatPanelProps) {
+  const { messages, isLoading, error, sendMessage, clearError } = useChat({
+    projectId,
+    branchId,
+    initialMessages,
+  });
 
   return (
     <section className="chat-panel" aria-label="Chat">

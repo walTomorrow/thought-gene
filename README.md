@@ -118,6 +118,18 @@ Set your Cloudflare account ID in `wrangler.toml`:
 account_id = "your_account_id_here"
 ```
 
+Create the D1 database and apply migrations:
+
+```powershell
+pnpm wrangler d1 create thought-gene-db
+```
+
+Copy the `database_id` from the output into `wrangler.toml` (replace `REPLACE_WITH_DATABASE_ID`), then:
+
+```powershell
+pnpm db:migrate:local
+```
+
 Optionally override the AI model:
 
 ```powershell
@@ -130,6 +142,6 @@ Start the dev server:
 pnpm dev
 ```
 
-Open the URL shown in the terminal (typically `http://localhost:5173`), send a chat message, and confirm you receive an assistant reply.
+Open the URL shown in the terminal (typically `http://localhost:5173`), send a chat message, and confirm you receive an assistant reply. Refresh the page — your conversation should reload from D1.
 
 See [docs/implementation.md](docs/implementation.md) for environment variables, request flow, and testing with curl.
