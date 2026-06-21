@@ -1,0 +1,6 @@
+# Copy to .dev.vars in the project root for local Wrangler overrides.
+# Wrangler loads .dev.vars automatically during `pnpm dev`.
+# Overrides wrangler.toml [vars] when present.
+
+# Current project default: @cf/meta/llama-3.1-8b-instruct-fast
+CLOUDFLARE_AI_MODEL=@cf/meta/llama-3.1-8b-instruct-fast

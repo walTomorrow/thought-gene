@@ -101,4 +101,35 @@ The initial MVP focuses on:
 
 ## Status
 
-Early development.
+Early development. See [docs/implementation.md](docs/implementation.md) for architecture and local setup.
+
+## Local Development
+
+Requires [Node.js](https://nodejs.org/) and [pnpm](https://pnpm.io/).
+
+```powershell
+pnpm install
+pnpm wrangler login
+```
+
+Set your Cloudflare account ID in `wrangler.toml`:
+
+```toml
+account_id = "your_account_id_here"
+```
+
+Optionally override the AI model:
+
+```powershell
+copy .dev.vars.example .dev.vars
+```
+
+Start the dev server:
+
+```powershell
+pnpm dev
+```
+
+Open the URL shown in the terminal (typically `http://localhost:5173`), send a chat message, and confirm you receive an assistant reply.
+
+See [docs/implementation.md](docs/implementation.md) for environment variables, request flow, and testing with curl.
