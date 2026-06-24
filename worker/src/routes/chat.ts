@@ -25,8 +25,13 @@ chatRoutes.post("/chat", async (context) => {
   } catch (error) {
     const errorMessage =
       error instanceof Error ? error.message : "Failed to generate a response.";
-    const status = errorMessage.includes("not found") ? 404 : 500;
-    return context.json({ error: errorMessage }, status);
+    if (errorMessage.includes("not found")) {
+      return context.json({ error: errorMessage }, 404);
+    }
+    if (errorMessage.includes("closed branch")) {
+      return context.json({ error: errorMessage }, 400);
+    }
+    return context.json({ error: errorMessage }, 500);
   }
 });
 

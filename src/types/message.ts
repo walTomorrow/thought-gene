@@ -16,7 +16,21 @@ export type {
   StoredMessage,
 };
 
-export type { WorkspaceResponse } from "../../shared/workspace";
+export type {
+  BranchActionRequest,
+  BranchActionResponse,
+  BranchRecord,
+  BranchStatus,
+  BranchSummary,
+  CreateBranchRequest,
+  CreateBranchResponse,
+  ProjectRecord,
+  UpdateBranchRequest,
+  UpdateBranchResponse,
+  WorkspaceResponse,
+} from "../../shared/workspace";
+
+export { isRootBranch } from "../../shared/workspace";
 
 /** UI message — same shape as StoredMessage from the API. */
 export type ChatMessage = StoredMessage;

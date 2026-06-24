@@ -1,7 +1,7 @@
 import type { ChatResponse } from "../../../shared/chat";
 import type { WorkerEnv } from "../types/env";
 import { runChatModel } from "../ai/run-chat";
-import { branchBelongsToProject } from "../db/branches";
+import { getBranchById } from "../db/branches";
 import { insertMessage, listMessagesByBranch } from "../db/messages";
 import { getProjectById } from "../db/projects";
 
@@ -24,9 +24,13 @@ export async function sendChatTurn(
     throw new Error("Project not found.");
   }
 
-  const belongs = await branchBelongsToProject(env.DB, input.branchId, input.projectId);
-  if (!belongs) {
+  const branch = await getBranchById(env.DB, input.branchId);
+  if (!branch || branch.projectId !== input.projectId) {
     throw new Error("Branch not found for this project.");
+  }
+
+  if (branch.status !== "active") {
+    throw new Error("Cannot send messages to a closed branch.");
   }
 
   const userMessage = await insertMessage(env.DB, {

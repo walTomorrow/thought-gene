@@ -8,43 +8,68 @@ This document is the canonical engineering guide for Thought Gene. It explains w
 
 ### Current branch
 
-`feature/project-foundation`
+`feature/branch-management`
 
 ### Current milestone
 
-**Project chat foundation** — persistent default project, main branch, and messages in Cloudflare D1.
+**Branch management** — create, switch, edit, close, and reopen persistent branches within the default project.
 
-**Status:** **Verified locally.** D1 schema, workspace bootstrap, and persisted chat work end-to-end: `pnpm dev` → `GET /api/workspace` → chat → browser refresh reloads history from D1. Manual D1 row counts matched expected message totals.
+**Status:** Implemented. Users can create branches (title, purpose, parent relationship), switch between active branches, edit title/purpose, close non-root branches, view closed branches as read-only history, and reopen closed branches. Each branch keeps its own D1 message history. Active branch selection persists in `localStorage` across refresh.
 
 ### Current goals
 
-- Store projects, branches, and messages in D1
-- Auto-create a default project with a Main branch
-- Load persisted messages on app start
-- Persist each chat turn (user + assistant) through the Worker
-- Keep chat UI presentational and modular for future branch UI
+- List active branches for the default project (closed branches in a separate section)
+- Create new branches with title, purpose, and parent branch
+- Edit branch title and purpose
+- Close/archive non-root branches; reopen closed branches
+- Switch branches and load per-branch message history from D1
+- Block chat on closed branches (server-side and read-only UI)
+- Keep chat UI presentational; orchestration in hooks and services
 
 ### Completed work
 
-- pnpm + Vite + React + TypeScript scaffold
-- Modular chat UI (message list, input, loading/error states)
-- Hono Worker with `GET /api/workspace` and `POST /api/chat`
-- Workers AI integration via `[ai]` binding
-- Cloudflare D1 binding with migrations for `projects`, `branches`, `messages`
-- Default project + Main branch get-or-create on workspace load
-- Message persistence and reload on browser refresh
-- Shared types in `shared/chat.ts` and `shared/workspace.ts`
-- DB access modules, services, and route separation
-- Workers AI model: `@cf/meta/llama-3.1-8b-instruct-fast`
-- **Local verification (2026):** Default Project + Main branch load in UI; messages persist across refresh; D1 `COUNT(*)` matched UI message count
+- All `feature/project-foundation` work (D1, workspace bootstrap, persisted chat)
+- `GET /api/workspace?branchId=` — project, active + closed branch lists, selected branch, messages, `isReadOnly`
+- `POST /api/branches` — create branch with title, purpose, parentBranchId
+- `PATCH /api/branches/:branchId` — update title and/or purpose
+- `POST /api/branches/:branchId/close` — close non-root branch (`status=closed`, `closed_at` set)
+- `POST /api/branches/:branchId/reopen` — reopen closed branch
+- Root branch protection via `parent_branch_id IS NULL` (`isRootBranch()` in `shared/workspace.ts`)
+- Branch sidebar UI (`BranchList`, `ClosedBranchList`, `CreateBranchForm`, `BranchDetailsPanel`)
+- `localStorage` for last-selected branch across refresh
+- DB: `listActiveBranchesByProject`, `listClosedBranchesByProject`, `updateBranch`, `closeBranch`, `reopenBranch`, `findRootBranch`
+- Services: `branch-service`, evolved `workspace-service` and `chat-service` (rejects closed branches)
 
 ### Remaining work (future branches)
 
-- Multiple project UI and project creation flows
-- Branch creation, switching, and closure UI
+See [Intentionally out of scope](#intentionally-out-of-scope) for what this milestone deliberately excludes.
+
+- Create branch from specific message (`source_message_id`)
+- Branch context injection (`context_summary`, parent message seeding)
+- LLM-generated closure packets (`closure_summary`)
+- AI-suggested branch metadata
+- Multiple project UI
 - Artifact extraction and project memory dashboard
 - Markdown rendering and streaming responses
 - Authentication and deployment hardening
+
+### Intentionally out of scope
+
+The following are **not** part of `feature/branch-management` and were explicitly deferred:
+
+| Area | Notes |
+|------|-------|
+| LLM closure packets | `closure_summary` stays `NULL` on close; no Workers AI call at close time |
+| Decision / open-question / deferred-implementation extraction | No artifact tables or extraction jobs |
+| `ready_to_close` workflow | Column exists in schema; no UI or API uses this status yet |
+| Project memory dashboard | No summary or artifact views |
+| RAG / vector search | No embeddings or retrieval |
+| GitHub integration | No external repo linking |
+| New D1 migrations | Lifecycle reuses `status` and `closed_at` from `0001_initial.sql` |
+| Create branch from message | `source_message_id` column unused |
+| Branch context seeding | `context_summary` unused; new branches start with empty chat |
+| URL deep links for branches | Selection stored in `localStorage` only |
+| Auth / per-user workspaces | Single shared default project for all visitors |
 
 ---
 
@@ -53,13 +78,20 @@ This document is the canonical engineering guide for Thought Gene. It explains w
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │                        Browser (React)                       │
-│  useWorkspace → GET /api/workspace                           │
-│  ChatPanel → useChat → POST /api/chat                        │
+│  useWorkspace → GET /api/workspace?branchId=                 │
+│  BranchList (active) / ClosedBranchList / BranchDetailsPanel │
+│  CreateBranchForm → POST /api/branches                         │
+│  BranchDetailsPanel → PATCH, POST .../close, POST .../reopen │
+│  ChatPanel → useChat → POST /api/chat (input off if readOnly)│
 └─────────────────────────────┬───────────────────────────────┘
                               │ HTTP JSON
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │              Cloudflare Worker (Hono) — worker/src/          │
+│  GET  /api/workspace                                         │
+│  POST /api/branches · PATCH /api/branches/:id                │
+│  POST /api/branches/:id/close · POST /api/branches/:id/reopen│
+│  POST /api/chat (rejects non-active branches → 400)          │
 │  routes/ → services/ → db/ → D1                              │
 │  routes/ → services/ → ai/run-chat.ts → Workers AI           │
 └─────────────────────────────┬───────────────────────────────┘
@@ -77,19 +109,25 @@ Static assets (HTML, JS, CSS) are built by Vite and served through Cloudflare As
 
 ### Frontend responsibilities
 
-- Load workspace on mount (`useWorkspace`)
-- Render chat UI and manage in-session message state (`useChat`)
-- Send new user turns to `POST /api/chat` with real `projectId` / `branchId`
-- Show loading and error states for workspace and chat
+- Load workspace on mount (`useWorkspace`) with optional stored `branchId`
+- Render **active** branch list (`BranchList`), **closed** branch list (`ClosedBranchList`), and branch details (`BranchDetailsPanel`)
+- Create branches via `CreateBranchForm` (disabled while viewing a closed branch)
+- Switch branches (active or closed) and reload per-branch messages from D1
+- Edit title/purpose on **active** branches only; close non-root branches; reopen closed branches
+- Render chat UI with read-only mode when `workspace.isReadOnly` (`ChatPanel` disables input and shows a banner)
+- Send new user turns to `POST /api/chat` only from active branches (UI prevents send; server enforces as backup)
+- Show loading and error states for workspace, branch switch, lifecycle actions, and chat
 - Stay free of Workers AI, D1, or SQL logic
 
 ### Backend responsibilities
 
-- Bootstrap default project + Main branch (`GET /api/workspace`)
-- Validate chat requests (`parseChatRequest`)
-- Persist messages to D1, load branch history for AI context
-- Call Workers AI through the `AI` binding
-- Return JSON workspace or chat turn responses
+- Bootstrap default project + root branch (`GET /api/workspace`)
+- List active and closed branches; resolve selected branch (`?branchId=`, including closed for read-only view)
+- Create branches (`POST /api/branches`) with title, purpose, parent
+- Update branch metadata (`PATCH /api/branches/:branchId`)
+- Close and reopen branches (`POST .../close`, `POST .../reopen`); root branch cannot be closed
+- Validate chat requests; reject messages to closed branches; persist messages per active branch
+- Call Workers AI with branch-scoped history from D1
 
 ### Cloudflare responsibilities
 
@@ -100,43 +138,304 @@ Static assets (HTML, JS, CSS) are built by Vite and served through Cloudflare As
 
 ### Data flow
 
+#### Frontend data flow
+
+| Step | Hook / component | Action |
+|------|------------------|--------|
+| Mount | `useWorkspace` | Read `thought-gene:activeBranchId` from `localStorage`; call `GET /api/workspace?branchId=` |
+| Render lists | `BranchList`, `ClosedBranchList` | `workspace.branches` (active) and `workspace.closedBranches` (closed) |
+| Select branch | `useWorkspace.selectBranch` | Re-fetch workspace with new `branchId`; update `localStorage` |
+| Create branch | `CreateBranchForm` → `useWorkspace.createBranch` | `POST /api/branches` with `parentBranchId` = current branch; reload workspace on new id |
+| Edit branch | `BranchDetailsPanel` → `useWorkspace.updateBranch` | `PATCH /api/branches/:id`; reload workspace on same id |
+| Close branch | `BranchDetailsPanel` → `useWorkspace.closeBranch` | `POST .../close`; reload workspace on **root** branch id |
+| Reopen branch | `BranchDetailsPanel` → `useWorkspace.reopenBranch` | `POST .../reopen`; reload workspace on same id |
+| Chat | `ChatPanel` → `useChat` | `initialMessages` from workspace; `readOnly={workspace.isReadOnly}` disables `ChatInput` |
+| Stale branch id | `useWorkspace.loadWorkspace` | If requested `branchId` ≠ `data.branch.id`, clear `localStorage` (server fell back to root) |
+
+`ChatPanel` uses `key={workspace.branch.id}` so switching branches resets in-memory chat state from server `messages`.
+
+#### Backend data flow
+
+| Route | Service | DB / AI |
+|-------|---------|---------|
+| `GET /api/workspace` | `workspace-service.loadWorkspace` | `getOrCreateDefaultProject`, `getOrCreateMainBranch`, `listActiveBranchesByProject`, `listClosedBranchesByProject`, `getBranchForProject`, `listMessagesByBranch` |
+| `POST /api/branches` | `branch-service.createProjectBranch` | `createBranch` insert (`status='active'`) |
+| `PATCH /api/branches/:id` | `branch-service.updateProjectBranch` | `updateBranch` (title/purpose only; no status check) |
+| `POST /api/branches/:id/close` | `branch-service.closeProjectBranch` | `closeBranch` → `status='closed'`, `closed_at` set; root rejected |
+| `POST /api/branches/:id/reopen` | `branch-service.reopenProjectBranch` | `reopenBranch` → `status='active'`, `closed_at` cleared |
+| `POST /api/chat` | `chat-service.sendChatTurn` | Rejects if `branch.status !== 'active'`; then `insertMessage`, `listMessagesByBranch`, `runChatModel`, `insertMessage` |
+
+#### User flows (step by step)
+
 **App startup**
 
-1. `useWorkspace` calls `GET /api/workspace`.
-2. Worker get-or-creates **Default Project** and **Main** branch in D1.
-3. Worker loads all messages for the main branch.
-4. UI renders chat with persisted history.
+1. `useWorkspace` reads `localStorage` for last `branchId` (if any).
+2. Calls `GET /api/workspace?branchId=...`.
+3. Worker get-or-creates **Default Project** and **root branch** (`parent_branch_id IS NULL`; default title is `"Main"`).
+4. Worker returns project, active branch list, closed branch list, selected branch, messages, and `isReadOnly`.
+5. UI renders branch sidebar (active + closed sections), branch details, and chat for selected branch.
+
+**Create branch**
+
+1. User enters title + purpose in `CreateBranchForm`.
+2. `POST /api/branches` with `{ projectId, title, purpose, parentBranchId }`.
+3. `parentBranchId` defaults to the currently selected branch.
+4. Worker inserts new `active` branch row (no messages copied).
+5. UI switches to the new branch (empty chat).
+
+**Switch branch**
+
+1. User clicks a branch in `BranchList` (active) or `ClosedBranchList` (read-only).
+2. `GET /api/workspace?branchId=<id>` loads that branch's messages.
+3. `localStorage` updated with selected `branchId`.
+4. `ChatPanel` remounts (`key={branch.id}`) with new `initialMessages`; input disabled when `isReadOnly`.
+
+**Edit branch**
+
+1. User edits title and/or purpose in `BranchDetailsPanel` (active branches only — inputs disabled when `isReadOnly`).
+2. `PATCH /api/branches/:branchId` with `{ projectId, title, purpose }` (UI always sends both fields).
+3. Worker updates the branch row (`updateBranch` in `worker/src/db/branches.ts`); UI refreshes workspace.
+4. **Note:** The API accepts PATCH on closed branches (no status check), but the UI does not expose edit controls for closed branches.
+
+**Close branch**
+
+1. User clicks Close in `BranchDetailsPanel` (only for non-root active branches).
+2. `POST /api/branches/:branchId/close` with `{ projectId }`.
+3. Worker sets `status='closed'` and `closed_at`; `closure_summary` remains null (no LLM).
+4. UI switches to the root branch; closed branch appears under **Closed branches**.
+
+**Reopen branch**
+
+1. User selects a closed branch, then clicks Reopen in `BranchDetailsPanel`.
+2. `POST /api/branches/:branchId/reopen` with `{ projectId }`.
+3. Worker sets `status='active'` and clears `closed_at`.
+4. Branch returns to the active list; chat is enabled again.
 
 **Send message**
 
 1. User types a message and clicks Send.
-2. `useChat` calls `POST /api/chat` with `{ projectId, branchId, content }`.
-3. Worker validates project/branch, inserts user message into D1.
-4. Worker loads full branch history from D1.
-5. `runChatModel` calls Workers AI with stored history.
-6. Worker inserts assistant message into D1.
-7. Worker returns `{ reply, userMessage, assistantMessage }`.
-8. UI appends both persisted messages.
+2. `POST /api/chat` with `{ projectId, branchId, content }`.
+3. Worker rejects if branch `status !== 'active'` (400: *Cannot send messages to a closed branch.*).
+4. Worker persists user message, loads **this branch's** history, calls Workers AI.
+5. Worker persists assistant message and returns both records.
+6. UI appends messages.
 
-**Refresh:** Step 1 reloads messages from D1 — conversation is preserved.
+**Refresh:** Workspace reload uses stored `branchId` — same branch and history restored (including closed branches if that was the last selection).
 
 ---
 
-## Chat API Contract
+## Branch Lifecycle
+
+This section documents branch listing, edit, close/reopen, and read-only behavior as implemented in `feature/branch-management`.
+
+### How active branches are listed
+
+- **Query:** `listActiveBranchesByProject` in `worker/src/db/branches.ts` selects rows where `project_id = ? AND status = 'active'`.
+- **Sort order:** Root branch first (`ORDER BY CASE WHEN parent_branch_id IS NULL THEN 0 ELSE 1 END`), then `created_at ASC`.
+- **API:** Returned as `WorkspaceResponse.branches` (`BranchSummary[]`).
+- **UI:** Rendered by `BranchList` under the heading **Branches**. Closed branches never appear here.
+
+Branches with `status = 'ready_to_close'` are **not** included in either active or closed lists today (that status is reserved for a future workflow).
+
+### How closed branches are listed
+
+- **Query:** `listClosedBranchesByProject` selects rows where `project_id = ? AND status = 'closed'`.
+- **Sort order:** Most recently closed first (`ORDER BY closed_at DESC, created_at DESC`).
+- **API:** Returned as `WorkspaceResponse.closedBranches` (`BranchSummary[]`), separate from `branches`.
+- **UI:** Rendered by `ClosedBranchList` under **Closed branches**. The section is hidden when the list is empty (`return null`).
+- **Selection:** Clicking a closed branch calls `selectBranch` → `GET /api/workspace?branchId=` — same as active branches. `getBranchForProject` returns closed rows; they are not filtered out.
+
+### How branch edit works
+
+| Layer | Behavior |
+|-------|----------|
+| UI | `BranchDetailsPanel` shows title/purpose fields and **Save changes** when the branch is active (`canEdit = !isReadOnly`). |
+| Client | `useWorkspace.updateBranch` → `PATCH /api/branches/:branchId` with `{ projectId, title, purpose }` → reload workspace. |
+| Validation | `parseUpdateBranchRequest` requires `projectId` and at least one of `title` or `purpose`. |
+| Service | `updateProjectBranch` verifies the branch belongs to the project. |
+| DB | `updateBranch` updates `title`, `purpose`, `updated_at` only — does not change `status`. |
+
+### How branch close works
+
+| Layer | Behavior |
+|-------|----------|
+| UI | **Close branch** button shown only when `!isReadOnly && !isRootBranch(branch)` (`isRootBranch` checks `parentBranchId === null`). |
+| Client | `useWorkspace.closeBranch` → `POST /api/branches/:branchId/close` with `{ projectId }` → reload workspace on root branch id. |
+| Service | `closeProjectBranch` verifies project ownership, delegates to `closeBranch`. |
+| DB | Sets `status = 'closed'`, `closed_at = now()`, `updated_at = now()`. Does **not** set `closure_summary`. |
+| Errors | Root branch → `"The root branch cannot be closed."` (400). Already closed → 400. Not found → 404. |
+
+After close, the closed branch disappears from `branches` and appears in `closedBranches` on the next workspace load.
+
+### How branch reopen works
+
+| Layer | Behavior |
+|-------|----------|
+| UI | **Reopen branch** button shown when `isReadOnly` (viewing a closed branch). |
+| Client | `useWorkspace.reopenBranch` → `POST /api/branches/:branchId/reopen` with `{ projectId }` → reload workspace on same id. |
+| DB | Sets `status = 'active'`, `closed_at = NULL`, `updated_at = now()`. |
+| Errors | Already active → 400. Not found → 404. |
+
+### How closed branches become read-only
+
+Read-only is derived from branch status, not a separate flag in D1:
+
+1. **Server:** `workspace-service.loadWorkspace` sets `isReadOnly = selectedBranch.status === "closed"`.
+2. **UI — chat:** `App` passes `readOnly={workspace.isReadOnly}` to `ChatPanel`, which disables `ChatInput` and shows *"Viewing closed branch — sending messages is disabled."*
+3. **UI — sidebar:** `CreateBranchForm` is disabled when `workspace.isReadOnly`. `BranchDetailsPanel` disables title/purpose inputs and hides **Save changes**.
+4. **UI — details:** `BranchDetailsPanel` shows *"This branch is closed. History is read-only."*
+5. **Messages:** `listMessagesByBranch` still returns full history for closed branches — read-only applies to **sending**, not viewing.
+
+### Why the root branch cannot be closed
+
+Protection is **structural**, not based on the display title `"Main"`:
+
+- **Shared helper:** `isRootBranch()` in `shared/workspace.ts` — `parentBranchId === null`.
+- **DB helper:** `isRootBranchRecord()` in `worker/src/db/branches.ts` — same check before close.
+- **Root lookup:** `findRootBranch` uses `WHERE parent_branch_id IS NULL`.
+
+The default root branch is created with title `"Main"` via `createMainBranch`, but renaming it does not affect close protection. Only branches with a non-null `parent_branch_id` can be closed.
+
+### How the app prevents sending messages to closed branches
+
+Defense in depth — UI first, server authoritative:
+
+| Layer | Mechanism |
+|-------|-----------|
+| UI | `ChatPanel` sets `inputDisabled = disabled \|\| isLoading \|\| readOnly` — no request is sent while viewing a closed branch. |
+| API | `chat-service.sendChatTurn` loads the branch and throws if `branch.status !== "active"` with message *"Cannot send messages to a closed branch."* |
+| Route | `routes/chat.ts` maps that error to **HTTP 400**. |
+
+A direct `POST /api/chat` with a closed `branchId` bypasses the UI but is rejected server-side before any message insert or Workers AI call.
+
+### Schema migration
+
+**No new migration was required.** `migrations/0001_initial.sql` already defines:
+
+- `branches.status` — `CHECK (status IN ('active', 'ready_to_close', 'closed'))`
+- `branches.closed_at` — nullable timestamp set on close, cleared on reopen
+- `branches.closure_summary` — exists but intentionally left `NULL`
+
+This milestone only started **using** those columns; it did not change the schema.
+
+---
+
+## API Contract
+
+### Routes summary
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/workspace?branchId=` | Bootstrap project, branch lists, messages, `isReadOnly` |
+| `POST` | `/api/branches` | Create active branch |
+| `PATCH` | `/api/branches/:branchId` | Update title and/or purpose |
+| `POST` | `/api/branches/:branchId/close` | Close non-root branch |
+| `POST` | `/api/branches/:branchId/reopen` | Reopen closed branch |
+| `POST` | `/api/chat` | Send one user turn (active branches only) |
+
+Types live in `shared/workspace.ts` and `shared/chat.ts`.
 
 ### `GET /api/workspace`
 
-Returns the default project, its Main branch, and all persisted messages.
+Optional query: `?branchId=<uuid>`
 
 ```ts
 type WorkspaceResponse = {
   project: ProjectRecord;
-  branch: BranchRecord;
-  messages: StoredMessage[];
+  branches: BranchSummary[];       // active only
+  closedBranches: BranchSummary[]; // status === "closed"
+  branch: BranchRecord;            // selected branch (active or closed)
+  messages: StoredMessage[];       // messages for selected branch only
+  isReadOnly: boolean;             // true when selected branch is closed
+};
+
+type BranchSummary = {
+  id: string;
+  title: string;
+  purpose: string;
+  status: "active" | "ready_to_close" | "closed";
+  parentBranchId: string | null;
+  createdAt: string;
+  closedAt?: string | null;
 };
 ```
 
-On first access, creates **Default Project** and a **Main** branch if they do not exist.
+- Returns **active** branches in `branches` and **closed** branches in `closedBranches`.
+- If `branchId` is missing or unknown to the project → falls back to the **root branch** (`parent_branch_id IS NULL`).
+- If `branchId` refers to a closed branch → loads it for read-only viewing (`isReadOnly: true`).
+- On first access, creates **Default Project** and root branch if needed (default title `"Main"`).
+- Root branch is identified structurally by `parentBranchId === null`, not by title. Use `isRootBranch()` from `shared/workspace.ts`.
+
+Full `BranchRecord` shape (selected branch and mutation responses):
+
+```ts
+type BranchRecord = {
+  id: string;
+  projectId: string;
+  parentBranchId: string | null;
+  sourceMessageId: string | null;
+  title: string;
+  purpose: string;
+  status: "active" | "ready_to_close" | "closed";
+  contextSummary: string | null;
+  closureSummary: string | null;
+  createdAt: string;
+  updatedAt: string;
+  closedAt: string | null;
+};
+```
+
+### `POST /api/branches`
+
+```ts
+type CreateBranchRequest = {
+  projectId: string;
+  title: string;
+  purpose: string;
+  parentBranchId?: string;   // UI sends current branch; service defaults to root if omitted
+};
+
+type CreateBranchResponse = {
+  branch: BranchRecord;
+};
+```
+
+Creates an `active` branch with `parent_branch_id` set. Does **not** set `source_message_id` or `context_summary`.
+
+### `PATCH /api/branches/:branchId`
+
+```ts
+type UpdateBranchRequest = {
+  projectId: string;
+  title?: string;
+  purpose?: string;
+};
+
+type UpdateBranchResponse = {
+  branch: BranchRecord;
+};
+```
+
+At least one of `title` or `purpose` must be provided. Updates `title`, `purpose`, and `updated_at` only. No `status` check — closed branches can be updated via API, but the UI does not expose edit controls for them.
+
+### `POST /api/branches/:branchId/close`
+
+```ts
+type BranchActionRequest = { projectId: string };
+type BranchActionResponse = { branch: BranchRecord };
+```
+
+- Sets `status='closed'` and `closed_at` to the current time.
+- **Root branch cannot be closed** (`parent_branch_id IS NULL` → 400, message: *"The root branch cannot be closed."*).
+- `closure_summary` is not populated (no LLM closure packet in this milestone).
+- Already closed → 400 (*"Branch is already closed."*).
+
+### `POST /api/branches/:branchId/reopen`
+
+Same request/response shape as close.
+
+- Sets `status='active'` and clears `closed_at`.
+- Returns 400 if the branch is already active (*"Branch is already active."*).
 
 ### `POST /api/chat`
 
@@ -171,18 +470,35 @@ type ChatResponse = {
 };
 ```
 
+**Errors:**
+
+| Condition | HTTP | Message |
+|-----------|------|---------|
+| Branch not found | 404 | *"Branch not found for this project."* |
+| Branch `status !== 'active'` | 400 | *"Cannot send messages to a closed branch."* |
+| Invalid body | 400 | Validation message from `parseChatRequest` |
+
 ### Why the client no longer sends `messages[]`
 
 The previous API accepted full client history. With D1 persistence, the server loads history from the database to avoid drift, duplicate IDs, and tampering. The client receives server-generated message IDs after each turn.
 
-### Default project and Main branch
+### Default project and branch bootstrap
 
 | Entity | Default | How created |
 |--------|---------|-------------|
 | Project | name: `"Default Project"` | `getOrCreateDefaultProject()` on workspace load |
-| Branch | title: `"Main"`, purpose: `"Main project conversation"`, status: `"active"` | `getOrCreateMainBranch()` for that project |
+| Root branch | title: `"Main"`, purpose: `"Main project conversation"`, `parent_branch_id IS NULL` | `getOrCreateMainBranch()` for that project (finds/creates by `parent_branch_id IS NULL`) |
+| User branches | title + purpose from form | `POST /api/branches`; parent = current branch unless specified |
 
-Real UUIDs are generated in the Worker. No hardcoded placeholder IDs at runtime.
+**Root branch identification:** The project root is the branch where `parentBranchId === null` (D1: `parent_branch_id IS NULL`). The default title is `"Main"`, but protection logic (e.g. cannot close) uses `isRootBranch()`, not the title string.
+
+### Active branch persistence (client)
+
+Key: `thought-gene:activeBranchId` in `localStorage`.
+
+- Set after successful workspace load or branch create/switch.
+- Cleared if server returns a different branch than requested (stale id).
+- Falls back to root branch when no stored id or invalid id.
 
 Shared definitions: `shared/workspace.ts`, `shared/chat.ts`.
 
@@ -238,7 +554,7 @@ Shared definitions: `shared/workspace.ts`, `shared/chat.ts`.
 
 **Problem it solves:** Composable chat UI that can grow with branch switchers and memory sidebars.
 
-**Interaction:** `App.tsx` uses `useWorkspace` + `ChatPanel`; chat state in `useChat`.
+**Interaction:** `App.tsx` uses `useWorkspace` (branch lifecycle) + `ChatPanel`; chat state in `useChat`.
 
 ### Cloudflare Workers
 
@@ -258,7 +574,7 @@ Shared definitions: `shared/workspace.ts`, `shared/chat.ts`.
 
 **Problem it solves:** Structured routing without Express-style weight.
 
-**Interaction:** `worker/src/app.ts` mounts `/api/workspace` and `/api/chat`.
+**Interaction:** `worker/src/app.ts` mounts `/api/workspace`, `/api/branches`, and `/api/chat`.
 
 ### Workers AI
 
@@ -371,14 +687,27 @@ One command runs both the React dev server and the Worker in the Workers runtime
 
 ```text
 GET /api/workspace
-  → workspace-service → db/projects, db/branches, db/messages → D1
+  → workspace-service.loadWorkspace
+  → db/projects, db/branches (active + closed lists), db/messages
+  → D1
+
+POST /api/branches
+  → parseCreateBranchRequest → branch-service.createProjectBranch → db/branches.createBranch → D1
+
+PATCH /api/branches/:branchId
+  → parseUpdateBranchRequest → branch-service.updateProjectBranch → db/branches.updateBranch → D1
+
+POST /api/branches/:branchId/close | /reopen
+  → parseBranchActionRequest → branch-service → db/branches.closeBranch | reopenBranch → D1
 
 POST /api/chat
   → parseChatRequest
-  → chat-service → insert user message → D1
-  → load branch history → D1
-  → runChatModel → Workers AI
-  → insert assistant message → D1
+  → chat-service.sendChatTurn
+      → getBranchById (reject if status !== 'active')
+      → insert user message → D1
+      → load branch history → D1
+      → runChatModel → Workers AI
+      → insert assistant message → D1
   → JSON { reply, userMessage, assistantMessage }
 ```
 
@@ -393,10 +722,24 @@ Defined in `migrations/0001_initial.sql`:
 | Table | Purpose |
 |-------|---------|
 | `projects` | Top-level workspace container |
-| `branches` | Conversational workspaces (Main branch created automatically) |
+| `branches` | Conversational workspaces; root branch has `parent_branch_id IS NULL` |
 | `messages` | Chat messages scoped to a branch |
 
-Columns align with MVP types (`docs/mvp.md`). Branch lifecycle columns (`status`, `closure_summary`, etc.) exist but are unused until branch closure is built.
+#### `branches` column usage (this milestone)
+
+| Column | Used? | Role |
+|--------|-------|------|
+| `id`, `project_id`, `title`, `purpose` | Yes | Identity and display |
+| `parent_branch_id` | Yes | Tree structure; `NULL` = root branch (close-protected) |
+| `status` | Yes | `'active'` vs `'closed'` for listing and chat gate |
+| `closed_at` | Yes | Set on close, cleared on reopen; sort key for closed list |
+| `created_at`, `updated_at` | Yes | Timestamps; `updated_at` bumped on edit/close/reopen |
+| `source_message_id` | No | Reserved for create-from-message |
+| `context_summary` | No | Reserved for branch context injection |
+| `closure_summary` | No | Reserved for LLM closure packets |
+| `ready_to_close` status value | No | In schema CHECK constraint only |
+
+Columns align with MVP types (`docs/mvp.md`). Branch lifecycle uses existing `status` and `closed_at` from `0001_initial.sql`. **No new migration** was added for `feature/branch-management`.
 
 ### D1 setup (required before first `pnpm dev`)
 
@@ -516,36 +859,73 @@ Optional API check:
 curl http://localhost:5173/api/workspace
 ```
 
-Expect JSON with `project`, `branch`, and `messages` arrays. On first load, `messages` is `[]`; after chatting, it contains persisted rows.
+Expect JSON with `project`, `branches`, `closedBranches`, `branch`, `messages`, and `isReadOnly`. On first load, `closedBranches` is `[]`, `branches` includes the root branch (title `"Main"`), `messages` is `[]`, and `isReadOnly` is `false`.
 
-**2. Chat + Workers AI**
+**2. Branch creation**
 
-- Send a user message; confirm an assistant reply appears
-- Send a second message; confirm multi-turn context works (assistant sees prior messages via D1 history)
+- In the sidebar, enter a title (e.g. `Data Storage`) and purpose
+- Click **Create branch**
+- UI switches to the new branch with an empty chat
+- Main branch should still appear in the branch list
 
-**3. Persistence across refresh**
-
-- Send one or more messages
-- Hard-refresh the browser (F5 or Ctrl+R)
-- Confirm the same messages reappear without re-sending
-
-**4. D1 row count (optional sanity check)**
-
-Count messages in the **local** D1 database:
+Optional API check:
 
 ```powershell
-pnpm wrangler d1 execute thought-gene-db --local --command "SELECT COUNT(*) AS count FROM messages;"
+curl -X POST http://localhost:5173/api/branches `
+  -H "Content-Type: application/json" `
+  -d "{\"projectId\":\"YOUR_PROJECT_ID\",\"title\":\"API Design\",\"purpose\":\"Explore API shape for MVP\"}"
 ```
 
-The count should match the number of messages shown in the UI (user + assistant rows). After *N* successful chat turns, expect **2N** message rows.
+**3. Branch switching + isolated history**
 
-To inspect rows:
+- On the **root branch**, send a message (e.g. “This is the main thread”)
+- Switch to another branch; send a different message
+- Switch back to root — only root messages should appear
+- Refresh the browser — same active branch and history should reload
+
+**4. Edit branch**
+
+- Select an active branch; change title and/or purpose in the details panel
+- Refresh — edits should persist
+
+**5. Close and reopen branch**
+
+- Create a non-root branch, send a message, then close it
+- Branch moves to **Closed branches**; UI switches to root; chat input disabled on closed branch
+- `GET /api/workspace` should show the branch in `closedBranches`, not in `branches`, with `isReadOnly: false` while on root
+- Select the closed branch — history visible, `isReadOnly: true`, read-only banner shown
+- Reopen — branch returns to active list; chat works again
+- Attempt to close the root branch — should show an error (UI hides Close; API returns 400 with *"The root branch cannot be closed."*)
+
+**6. Closed branch chat blocked (server)**
 
 ```powershell
-pnpm wrangler d1 execute thought-gene-db --local --command "SELECT id, role, substr(content, 1, 40) AS preview, created_at FROM messages ORDER BY created_at;"
+curl -X POST http://localhost:5173/api/chat `
+  -H "Content-Type: application/json" `
+  -d "{\"projectId\":\"YOUR_PROJECT_ID\",\"branchId\":\"CLOSED_BRANCH_ID\",\"content\":\"test\"}"
 ```
 
-**5. curl chat turn (optional)**
+Expected: `400` with *Cannot send messages to a closed branch.*
+
+**7. Chat + Workers AI**
+
+- Send messages in any **active** branch; confirm assistant replies
+- Multi-turn context is scoped to the **current branch only**
+
+**8. Persistence across refresh**
+
+- Select a non-root branch, send messages, refresh
+- Confirm you return to that branch with its history (`localStorage`)
+
+**9. D1 row count (optional)**
+
+```powershell
+pnpm wrangler d1 execute thought-gene-db --local --command "SELECT branch_id, COUNT(*) AS count FROM messages GROUP BY branch_id;"
+```
+
+Each branch with chat activity should have its own row count.
+
+**10. curl chat turn (optional)**
 
 Use `projectId` and `branchId` from the workspace response:
 
@@ -561,10 +941,17 @@ Expected: `{ "reply", "userMessage", "assistantMessage" }` with server-generated
 
 | Check | Result |
 |-------|--------|
-| Default Project + Main branch in UI | Pass |
-| Messages saved to D1 on send | Pass |
-| Browser refresh preserves history | Pass |
-| D1 `COUNT(*)` matches UI message count | Pass |
+| Default Project + Main branch in UI | Pass (project-foundation) |
+| Messages saved to D1 on send | Pass (project-foundation) |
+| Browser refresh preserves history | Pass (project-foundation) |
+| Create branch with title + purpose | Pass (branch-management) |
+| Switch branches loads correct history | Pass (branch-management) |
+| Per-branch messages isolated in D1 | Pass (branch-management) |
+| Edit branch title/purpose | Pass (branch-management) |
+| Close non-root branch; read-only view | Pass (branch-management) |
+| Reopen closed branch | Pass (branch-management) |
+| Chat rejected on closed branch (API) | Pass (branch-management) |
+| Root branch protected via `parent_branch_id IS NULL` | Pass (branch-management) |
 
 ---
 
@@ -578,22 +965,31 @@ thought-gene/
 │   ├── chat.ts              # Chat API types
 │   └── workspace.ts         # Workspace API types
 ├── worker/src/
-│   ├── db/                  # D1 queries (projects, branches, messages)
-│   ├── services/            # workspace-service, chat-service
+│   ├── db/                  # projects, branches, messages
+│   ├── services/            # workspace, branch, chat services
 │   ├── routes/
 │   │   ├── workspace.ts     # GET /api/workspace
+│   │   ├── branches.ts      # POST/PATCH /api/branches, close, reopen
 │   │   └── chat.ts          # POST /api/chat
 │   ├── validation/
+│   │   ├── parse-create-branch.ts
+│   │   ├── parse-update-branch.ts
+│   │   ├── parse-branch-action.ts
+│   │   └── parse-chat-request.ts
 │   ├── ai/run-chat.ts
-│   └── types/env.ts         # WorkerEnv: AI, DB, vars
+│   └── types/env.ts
 ├── src/
 │   ├── api/
 │   │   ├── workspace-client.ts
+│   │   ├── branches-client.ts
 │   │   └── chat-client.ts
 │   ├── hooks/
 │   │   ├── use-workspace.ts
 │   │   └── use-chat.ts
-│   └── components/chat/     # Presentational UI (unchanged pattern)
+│   ├── lib/branch-storage.ts
+│   └── components/
+│       ├── branches/        # BranchList, ClosedBranchList, CreateBranchForm, BranchDetailsPanel
+│       └── chat/            # Presentational chat UI (readOnly support)
 ├── wrangler.toml            # AI + D1 bindings
 └── package.json             # db:migrate:local / db:migrate:remote scripts
 ```
@@ -651,11 +1047,53 @@ Moving these into subfolders would fight tool defaults without a clear maintaina
 
 **Alternatives:** SQL inline in routes. Rejected — harder to test and extend.
 
-### Decision: `GET /api/workspace` bootstrap
+### Decision: `GET /api/workspace` bootstrap with branch lists
 
-**Why:** Single endpoint for default project + Main branch + messages without project picker UI.
+**Why:** Single endpoint returns project, active and closed branch lists, selected branch, messages, and `isReadOnly` — avoids N+1 fetches for single-project app.
 
-**Alternatives:** Separate project CRUD endpoints. Deferred — out of scope for this branch.
+**Alternatives:** Separate `GET /api/branches` and `GET /api/branches/:id/messages`. Deferred until multi-project or heavy branch lists.
+
+### Decision: Split active and closed branches in the API response
+
+**Why:** Active switcher (`branches`) stays uncluttered; closed history is discoverable without mixing lifecycle states in one list.
+
+**Alternatives:** Single list with a `status` filter on the client. Rejected — harder to render distinct UI sections and default sort orders.
+
+### Decision: Root branch via `parent_branch_id IS NULL`
+
+**Why:** Renaming the default branch title should not affect lifecycle rules. Structural root detection matches the data model.
+
+**Alternatives:** Title check for `"Main"`. Rejected — fragile if users rename the root branch.
+
+### Decision: Close without LLM closure packet
+
+**Why:** This milestone covers lifecycle UX and server enforcement only; `closure_summary` stays null until artifact extraction is built.
+
+**Alternatives:** Generate summary on close via Workers AI. Deferred per scope.
+
+### Decision: Read-only enforced in UI and API
+
+**Why:** `isReadOnly` disables chat input and branch creation immediately; `chat-service` rejects non-active branches so direct API calls cannot append messages to closed history.
+
+**Alternatives:** UI-only disable. Rejected — server must be authoritative for persisted data.
+
+### Decision: `localStorage` for active branch
+
+**Why:** Minimal persistence of UI selection across refresh without server-side user preferences or URL routing.
+
+**Alternatives:** URL `?branch=` query param. Deferred — better for deep links later.
+
+### Decision: Manual branch creation only (title + purpose)
+
+**Why:** Smallest path to multiple persistent conversations; matches this milestone scope.
+
+**Alternatives:** Create from message, AI-suggested metadata. Deferred per MVP sequencing.
+
+### Decision: New branches start with empty message history
+
+**Why:** Clean per-branch conversations; parent relationship stored via `parent_branch_id` only.
+
+**Alternatives:** Copy parent messages or inject `context_summary`. Deferred to branch-context milestone.
 
 ### Decision: Shared types in `shared/chat.ts` and `shared/workspace.ts`
 
@@ -698,28 +1136,30 @@ Moving these into subfolders would fight tool defaults without a clear maintaina
 | Limitation | Notes |
 |------------|-------|
 | Single default project only | No project picker or multi-project UI |
-| Main branch only in UI | Branches table exists; no create/switch/close UI |
-| All messages loaded at once | No pagination; fine for early chats |
+| No LLM closure packets | `closure_summary` not populated on close |
+| `ready_to_close` unused | Branches in this status would not appear in active or closed lists |
+| Closed branch metadata edit UI | API allows PATCH on closed branches; UI disables edit when `isReadOnly` |
+| No create-from-message | `source_message_id` column unused |
+| No branch context seeding | `context_summary` unused; new branches have empty chat |
+| Active branch in localStorage only | No URL deep links; cleared if stale |
+| All messages loaded per branch | No pagination |
 | No auth | Single shared D1 workspace for all visitors |
-| User message persisted before AI | If AI fails, user message remains in DB without assistant reply |
-| No streaming | Full response returned at once |
-| No markdown rendering | Plain pre-wrapped text |
-| System role not shown | Type supports `system`; UI renders user and assistant only |
+| User message persisted before AI | If AI fails, user message remains without assistant reply |
+| No streaming / markdown | Plain text responses |
 | `database_id` setup required | Each developer runs `wrangler d1 create` and migrates locally |
-| `account_id` in wrangler.toml | Each developer sets locally |
-| No automated tests | Manual smoke test only |
 | Deprecated model IDs | Update `CLOUDFLARE_AI_MODEL` if Workers AI returns 5028 |
-| Race on first workspace load | Rare duplicate default projects if two tabs bootstrap simultaneously |
 
 ### Future improvements
 
-- Multiple projects and branch switcher UI
-- Branch creation, closure, and artifact extraction
-- Paginated message history
-- Streaming responses
-- Markdown rendering for assistant messages
+See [Intentionally out of scope](#intentionally-out-of-scope) for deferred items. Additional ideas:
+- Create branch from message (`source_message_id`)
+- Branch context injection (`context_summary`, parent history seeding)
+- Multiple projects UI
+- Artifact extraction and project memory
+- URL routing for branches
+- Streaming and markdown rendering
 - Auth and per-user workspaces
 
 ---
 
-*Last updated: local D1 persistence verified on `feature/project-foundation`.*
+*Last updated: audited branch lifecycle docs on `feature/branch-management`.*

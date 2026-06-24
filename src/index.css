@@ -72,14 +72,212 @@ textarea:disabled {
   flex: 1;
   min-height: 0;
   padding: 1rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 1rem;
+  max-width: 72rem;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.branch-list-closed {
+  opacity: 0.95;
+}
+
+.branch-list-item-closed {
+  background: #f4f4f5;
+}
+
+.branch-details {
+  background: #ffffff;
+  border: 1px solid #e4e4e7;
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+
+.branch-details-heading {
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.branch-details-readonly {
+  margin: 0 0 0.75rem;
+  font-size: 0.8125rem;
+  color: #71717a;
+}
+
+.branch-details-label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.branch-details-input,
+.branch-details-textarea {
+  width: 100%;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #d4d4d8;
+  border-radius: 0.5rem;
+}
+
+.branch-details-save,
+.branch-details-close,
+.branch-details-reopen {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+.branch-details-save {
+  width: 100%;
+  margin-bottom: 0.75rem;
+  border: none;
+  background: #18181b;
+  color: #fafafa;
+}
+
+.branch-details-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.branch-details-close {
+  border: 1px solid #fca5a5;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.branch-details-reopen {
+  border: none;
+  background: #18181b;
+  color: #fafafa;
+}
+
+.chat-panel-readonly {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  font-size: 0.8125rem;
+  color: #71717a;
+  background: #fafafa;
+  border-bottom: 1px solid #e4e4e7;
+}
+
+.branch-sidebar {
+  flex: 0 0 16rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 0;
+}
+
+.branch-list,
+.create-branch-form {
+  background: #ffffff;
+  border: 1px solid #e4e4e7;
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+
+.branch-list-heading,
+.create-branch-heading {
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.branch-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.branch-list-item {
+  width: 100%;
+  text-align: left;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid #e4e4e7;
+  border-radius: 0.5rem;
+  background: #fafafa;
+  cursor: pointer;
+}
+
+.branch-list-item-active {
+  border-color: #18181b;
+  background: #f4f4f5;
+}
+
+.branch-list-item-title {
+  display: block;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.branch-list-item-purpose {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: #71717a;
+}
+
+.create-branch-label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.create-branch-input,
+.create-branch-textarea {
+  width: 100%;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #d4d4d8;
+  border-radius: 0.5rem;
+}
+
+.create-branch-submit {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: #18181b;
+  color: #fafafa;
+  cursor: pointer;
+}
+
+.workspace-chat {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-status-inline {
+  max-width: none;
+  padding: 0.5rem 0;
+  text-align: left;
 }
 
 .chat-panel {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  max-width: 48rem;
-  margin: 0 auto;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
   background: #ffffff;
   border: 1px solid #e4e4e7;
   border-radius: 0.75rem;
