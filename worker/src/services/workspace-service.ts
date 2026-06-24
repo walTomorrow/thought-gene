@@ -1,12 +1,13 @@
 import type { BranchSummary, WorkspaceResponse } from "../../../shared/workspace";
 import type { WorkerEnv } from "../types/env";
 import {
-  getBranchById,
   getOrCreateMainBranch,
   listActiveBranchesByProject,
+  listClosedBranchesByProject,
 } from "../db/branches";
 import { listMessagesByBranch } from "../db/messages";
 import { getOrCreateDefaultProject } from "../db/projects";
+import { getBranchForProject } from "./branch-service";
 
 function toBranchSummary(branch: {
   id: string;
@@ -15,6 +16,7 @@ function toBranchSummary(branch: {
   status: BranchSummary["status"];
   parentBranchId: string | null;
   createdAt: string;
+  closedAt: string | null;
 }): BranchSummary {
   return {
     id: branch.id,
@@ -23,35 +25,41 @@ function toBranchSummary(branch: {
     status: branch.status,
     parentBranchId: branch.parentBranchId,
     createdAt: branch.createdAt,
+    closedAt: branch.closedAt,
   };
 }
 
 /**
- * Loads the default workspace: project, active branches, selected branch, and its messages.
- * Creates the project and Main branch on first access.
+ * Loads the default workspace: project, branch lists, selected branch, and messages.
  */
 export async function loadWorkspace(
   env: WorkerEnv,
   branchId?: string,
 ): Promise<WorkspaceResponse> {
   const project = await getOrCreateDefaultProject(env.DB);
-  const mainBranch = await getOrCreateMainBranch(env.DB, project.id);
+  const rootBranch = await getOrCreateMainBranch(env.DB, project.id);
 
-  let selectedBranch = mainBranch;
+  let selectedBranch = rootBranch;
   if (branchId) {
-    const requested = await getBranchById(env.DB, branchId);
-    if (requested && requested.projectId === project.id && requested.status === "active") {
+    const requested = await getBranchForProject(env, branchId, project.id);
+    if (requested) {
       selectedBranch = requested;
+    } else if (branchId !== rootBranch.id) {
+      // Invalid id — fall back to root; client clears stale localStorage.
     }
   }
 
-  const branches = await listActiveBranchesByProject(env.DB, project.id);
+  const activeBranches = await listActiveBranchesByProject(env.DB, project.id);
+  const closedBranches = await listClosedBranchesByProject(env.DB, project.id);
   const messages = await listMessagesByBranch(env.DB, selectedBranch.id);
+  const isReadOnly = selectedBranch.status === "closed";
 
   return {
     project,
-    branches: branches.map(toBranchSummary),
+    branches: activeBranches.map(toBranchSummary),
+    closedBranches: closedBranches.map(toBranchSummary),
     branch: selectedBranch,
     messages,
+    isReadOnly,
   };
 }

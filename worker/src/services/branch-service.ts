@@ -1,15 +1,23 @@
-import type { BranchRecord, CreateBranchRequest } from "../../../shared/workspace";
+import type {
+  BranchRecord,
+  CreateBranchRequest,
+  UpdateBranchRequest,
+} from "../../../shared/workspace";
 import type { WorkerEnv } from "../types/env";
 import {
   branchBelongsToProject,
+  closeBranch as closeBranchRow,
   createBranch,
+  getBranchById,
   getOrCreateMainBranch,
+  reopenBranch as reopenBranchRow,
+  updateBranch as updateBranchRow,
 } from "../db/branches";
 import { getProjectById } from "../db/projects";
 
 /**
  * Creates a new active branch under a project.
- * parentBranchId defaults to the project's Main branch.
+ * parentBranchId defaults to the project's root branch.
  */
 export async function createProjectBranch(
   env: WorkerEnv,
@@ -31,8 +39,8 @@ export async function createProjectBranch(
       throw new Error("Parent branch not found for this project.");
     }
   } else {
-    const mainBranch = await getOrCreateMainBranch(env.DB, input.projectId);
-    parentBranchId = mainBranch.id;
+    const rootBranch = await getOrCreateMainBranch(env.DB, input.projectId);
+    parentBranchId = rootBranch.id;
   }
 
   return createBranch(env.DB, {
@@ -41,4 +49,81 @@ export async function createProjectBranch(
     title: input.title,
     purpose: input.purpose,
   });
+}
+
+export async function updateProjectBranch(
+  env: WorkerEnv,
+  branchId: string,
+  input: UpdateBranchRequest,
+): Promise<BranchRecord> {
+  const belongs = await branchBelongsToProject(env.DB, branchId, input.projectId);
+  if (!belongs) {
+    throw new Error("Branch not found for this project.");
+  }
+
+  const branch = await updateBranchRow(env.DB, branchId, {
+    title: input.title,
+    purpose: input.purpose,
+  });
+
+  if (!branch) {
+    throw new Error("Branch not found.");
+  }
+
+  return branch;
+}
+
+export async function closeProjectBranch(
+  env: WorkerEnv,
+  branchId: string,
+  projectId: string,
+): Promise<BranchRecord> {
+  const belongs = await branchBelongsToProject(env.DB, branchId, projectId);
+  if (!belongs) {
+    throw new Error("Branch not found for this project.");
+  }
+
+  const branch = await closeBranchRow(env.DB, branchId);
+  if (!branch) {
+    throw new Error("Branch not found.");
+  }
+
+  return branch;
+}
+
+export async function reopenProjectBranch(
+  env: WorkerEnv,
+  branchId: string,
+  projectId: string,
+): Promise<BranchRecord> {
+  const belongs = await branchBelongsToProject(env.DB, branchId, projectId);
+  if (!belongs) {
+    throw new Error("Branch not found for this project.");
+  }
+
+  const branch = await reopenBranchRow(env.DB, branchId);
+  if (!branch) {
+    throw new Error("Branch not found.");
+  }
+
+  return branch;
+}
+
+export async function getRootBranchForProject(
+  env: WorkerEnv,
+  projectId: string,
+): Promise<BranchRecord> {
+  return getOrCreateMainBranch(env.DB, projectId);
+}
+
+export async function getBranchForProject(
+  env: WorkerEnv,
+  branchId: string,
+  projectId: string,
+): Promise<BranchRecord | null> {
+  const branch = await getBranchById(env.DB, branchId);
+  if (!branch || branch.projectId !== projectId) {
+    return null;
+  }
+  return branch;
 }

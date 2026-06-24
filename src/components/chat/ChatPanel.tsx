@@ -9,6 +9,7 @@ type ChatPanelProps = {
   branchId: string;
   initialMessages: ChatMessage[];
   disabled?: boolean;
+  readOnly?: boolean;
 };
 
 /**
@@ -19,6 +20,7 @@ export function ChatPanel({
   branchId,
   initialMessages,
   disabled = false,
+  readOnly = false,
 }: ChatPanelProps) {
   const { messages, isLoading, error, sendMessage, clearError } = useChat({
     projectId,
@@ -26,10 +28,15 @@ export function ChatPanel({
     initialMessages,
   });
 
-  const inputDisabled = disabled || isLoading;
+  const inputDisabled = disabled || isLoading || readOnly;
 
   return (
     <section className="chat-panel" aria-label="Chat">
+      {readOnly && (
+        <p className="chat-panel-readonly" role="status">
+          Viewing closed branch — sending messages is disabled.
+        </p>
+      )}
       <MessageList messages={messages} />
       <ChatStatus
         isLoading={isLoading}
