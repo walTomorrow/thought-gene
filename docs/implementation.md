@@ -8,49 +8,41 @@ This document is the canonical engineering guide for Thought Gene. It explains w
 
 ### Current branch
 
-`feature/branch-management`
+`feature/branch-merges`
 
 ### Current milestone
 
-**Branch management** — create, switch, edit, close, and reopen persistent branches within the default project.
+**Branch merges** — generate, review, and confirm parent-facing merge packets from child branches.
 
-**Status:** Implemented. Users can create branches (title, purpose, parent relationship), switch between active branches, edit title/purpose, close non-root branches, view closed branches as read-only history, and reopen closed branches. Each branch keeps its own D1 message history. Active branch selection persists in `localStorage` across refresh.
+**Status:** Implemented. Users can merge an active child branch into its parent: LLM generates a structured packet, user reviews/edits, confirm inserts a visible merge message in the parent chat, optionally closes the child, and the UI switches to the parent with the new message highlighted.
 
 ### Current goals
 
-- List active branches for the default project (closed branches in a separate section)
-- Create new branches with title, purpose, and parent branch
-- Edit branch title and purpose
-- Close/archive non-root branches; reopen closed branches
-- Switch branches and load per-branch message history from D1
-- Block chat on closed branches (server-side and read-only UI)
-- Keep chat UI presentational; orchestration in hooks and services
+- Generate structured merge packets from child branch context (Workers AI)
+- Review and edit packets before confirming
+- Insert merge packet messages into the parent branch (`message_kind=merge_packet`)
+- Track merge history per child branch (`branch_merges` table)
+- One draft per child; replace or resume existing draft
+- Block root merges and merges into closed parents
+- Optionally close child after merge
 
 ### Completed work
 
-- All `feature/project-foundation` work (D1, workspace bootstrap, persisted chat)
-- `GET /api/workspace?branchId=` — project, active + closed branch lists, selected branch, messages, `isReadOnly`
-- `POST /api/branches` — create branch with title, purpose, parentBranchId
-- `PATCH /api/branches/:branchId` — update title and/or purpose
-- `POST /api/branches/:branchId/close` — close non-root branch (`status=closed`, `closed_at` set)
-- `POST /api/branches/:branchId/reopen` — reopen closed branch
-- Root branch protection via `parent_branch_id IS NULL` (`isRootBranch()` in `shared/workspace.ts`)
-- Branch sidebar UI (`BranchList`, `ClosedBranchList`, `CreateBranchForm`, `BranchDetailsPanel`)
-- `localStorage` for last-selected branch across refresh
-- DB: `listActiveBranchesByProject`, `listClosedBranchesByProject`, `updateBranch`, `closeBranch`, `reopenBranch`, `findRootBranch`
-- Services: `branch-service`, evolved `workspace-service` and `chat-service` (rejects closed branches)
+- All `feature/branch-management` work (branch lifecycle)
+- Migration `0002_branch_merges.sql` — `branch_merges` table; `messages.message_kind`, `messages.merge_id`
+- Merge API routes (`generate`, `PATCH` draft, `confirm`, `DELETE` discard, `GET` history)
+- `merge-service`, `merge-context`, `run-merge-packet`, `branch-merges` DB module
+- UI: **Merge to parent**, `MergeReviewModal`, `MergeHistoryList`, merge packet bubbles
+- `docs/branch-merges.md` specification
 
 ### Remaining work (future branches)
 
-See [Intentionally out of scope](#intentionally-out-of-scope) for what this milestone deliberately excludes.
-
+- Artifact promotion from merge/closure packets to project memory
 - Create branch from specific message (`source_message_id`)
 - Branch context injection (`context_summary`, parent message seeding)
-- LLM-generated closure packets (`closure_summary`)
-- AI-suggested branch metadata
+- LLM-generated closure packets on branch close (`closure_summary`)
 - Multiple project UI
-- Artifact extraction and project memory dashboard
-- Markdown rendering and streaming responses
+- Markdown rendering for merge packets
 - Authentication and deployment hardening
 
 ### Intentionally out of scope
@@ -59,8 +51,8 @@ The following are **not** part of `feature/branch-management` and were explicitl
 
 | Area | Notes |
 |------|-------|
-| LLM closure packets | `closure_summary` stays `NULL` on close; no Workers AI call at close time |
-| Decision / open-question / deferred-implementation extraction | No artifact tables or extraction jobs |
+| LLM closure packets on close | `closure_summary` stays null; merge uses separate `branch_merges` flow |
+| Artifact / project memory promotion | Merge packets stay in parent chat only |
 | `ready_to_close` workflow | Column exists in schema; no UI or API uses this status yet |
 | Project memory dashboard | No summary or artifact views |
 | RAG / vector search | No embeddings or retrieval |
@@ -81,8 +73,9 @@ The following are **not** part of `feature/branch-management` and were explicitl
 │  useWorkspace → GET /api/workspace?branchId=                 │
 │  BranchList (active) / ClosedBranchList / BranchDetailsPanel │
 │  CreateBranchForm → POST /api/branches                         │
-│  BranchDetailsPanel → PATCH, POST .../close, POST .../reopen │
-│  ChatPanel → useChat → POST /api/chat (input off if readOnly)│
+│  BranchDetailsPanel → PATCH, close, reopen, merge workflow      │
+│  MergeReviewModal → generate / edit / confirm merge packets      │
+│  ChatPanel → useChat → POST /api/chat (merge packets visible)  │
 └─────────────────────────────┬───────────────────────────────┘
                               │ HTTP JSON
                               ▼
@@ -91,6 +84,7 @@ The following are **not** part of `feature/branch-management` and were explicitl
 │  GET  /api/workspace                                         │
 │  POST /api/branches · PATCH /api/branches/:id                │
 │  POST /api/branches/:id/close · POST /api/branches/:id/reopen│
+│  GET/POST/PATCH/DELETE /api/branches/:id/merges/...          │
 │  POST /api/chat (rejects non-active branches → 400)          │
 │  routes/ → services/ → db/ → D1                              │
 │  routes/ → services/ → ai/run-chat.ts → Workers AI           │
@@ -331,9 +325,14 @@ This milestone only started **using** those columns; it did not change the schem
 | `PATCH` | `/api/branches/:branchId` | Update title and/or purpose |
 | `POST` | `/api/branches/:branchId/close` | Close non-root branch |
 | `POST` | `/api/branches/:branchId/reopen` | Reopen closed branch |
+| `GET` | `/api/branches/:childBranchId/merges?projectId=` | Merge history + active draft |
+| `POST` | `/api/branches/:childBranchId/merges/generate` | LLM generate draft packet |
+| `PATCH` | `/api/branches/:childBranchId/merges/:mergeId` | Update draft packet JSON |
+| `POST` | `/api/branches/:childBranchId/merges/:mergeId/confirm` | Insert parent merge message |
+| `DELETE` | `/api/branches/:childBranchId/merges/:mergeId?projectId=` | Discard draft |
 | `POST` | `/api/chat` | Send one user turn (active branches only) |
 
-Types live in `shared/workspace.ts` and `shared/chat.ts`.
+Types live in `shared/workspace.ts`, `shared/chat.ts`, and `shared/merge.ts`. See [docs/branch-merges.md](branch-merges.md).
 
 ### `GET /api/workspace`
 
@@ -460,6 +459,8 @@ type StoredMessage = {
   branchId: string;
   role: "user" | "assistant" | "system";
   content: string;
+  messageKind: "chat" | "merge_packet";
+  mergeId: string | null;
   createdAt: string;
 };
 
@@ -717,13 +718,14 @@ POST /api/chat
 
 ### Schema
 
-Defined in `migrations/0001_initial.sql`:
+Defined in `migrations/0001_initial.sql` and `migrations/0002_branch_merges.sql`:
 
 | Table | Purpose |
 |-------|---------|
 | `projects` | Top-level workspace container |
 | `branches` | Conversational workspaces; root branch has `parent_branch_id IS NULL` |
-| `messages` | Chat messages scoped to a branch |
+| `messages` | Chat and merge packet messages scoped to a branch |
+| `branch_merges` | Merge draft/confirm lifecycle and packet JSON |
 
 #### `branches` column usage (this milestone)
 
@@ -736,10 +738,28 @@ Defined in `migrations/0001_initial.sql`:
 | `created_at`, `updated_at` | Yes | Timestamps; `updated_at` bumped on edit/close/reopen |
 | `source_message_id` | No | Reserved for create-from-message |
 | `context_summary` | No | Reserved for branch context injection |
-| `closure_summary` | No | Reserved for LLM closure packets |
+| `closure_summary` | No | Reserved for LLM closure on branch close |
 | `ready_to_close` status value | No | In schema CHECK constraint only |
 
-Columns align with MVP types (`docs/mvp.md`). Branch lifecycle uses existing `status` and `closed_at` from `0001_initial.sql`. **No new migration** was added for `feature/branch-management`.
+#### `messages` column usage (branch-merges)
+
+| Column | Used? | Role |
+|--------|-------|------|
+| `message_kind` | Yes | `chat` (default) or `merge_packet` |
+| `merge_id` | Yes | Links merge packet messages to `branch_merges` |
+
+#### `branch_merges` column usage
+
+| Column | Role |
+|--------|------|
+| `merge_sequence` | 1-based counter per child branch |
+| `status` | `draft`, `confirmed`, or `discarded` |
+| `packet_json` | Structured `MergePacket` (user-editable while draft) |
+| `rendered_markdown` | Markdown inserted into parent on confirm |
+| `parent_message_id` | Parent `messages` row created on confirm |
+| `close_child_after` | Whether confirm also closed the child |
+
+One active draft per child enforced by partial unique index (`status = 'draft'`).
 
 ### D1 setup (required before first `pnpm dev`)
 
@@ -1162,4 +1182,4 @@ See [Intentionally out of scope](#intentionally-out-of-scope) for deferred items
 
 ---
 
-*Last updated: audited branch lifecycle docs on `feature/branch-management`.*
+*Last updated: branch merges on `feature/branch-merges`.*
