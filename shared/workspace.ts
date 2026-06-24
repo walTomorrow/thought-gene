@@ -8,6 +8,8 @@ export type ProjectRecord = {
   updatedAt: string;
 };
 
+export type BranchStatus = "active" | "ready_to_close" | "closed";
+
 export type BranchRecord = {
   id: string;
   projectId: string;
@@ -15,7 +17,7 @@ export type BranchRecord = {
   sourceMessageId: string | null;
   title: string;
   purpose: string;
-  status: "active" | "ready_to_close" | "closed";
+  status: BranchStatus;
   contextSummary: string | null;
   closureSummary: string | null;
   createdAt: string;
@@ -23,8 +25,30 @@ export type BranchRecord = {
   closedAt: string | null;
 };
 
+/** Lightweight branch row for lists and switchers. */
+export type BranchSummary = {
+  id: string;
+  title: string;
+  purpose: string;
+  status: BranchStatus;
+  parentBranchId: string | null;
+  createdAt: string;
+};
+
 export type WorkspaceResponse = {
   project: ProjectRecord;
+  branches: BranchSummary[];
   branch: BranchRecord;
   messages: StoredMessage[];
+};
+
+export type CreateBranchRequest = {
+  projectId: string;
+  title: string;
+  purpose: string;
+  parentBranchId?: string;
+};
+
+export type CreateBranchResponse = {
+  branch: BranchRecord;
 };

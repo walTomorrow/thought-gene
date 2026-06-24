@@ -8,40 +8,38 @@ This document is the canonical engineering guide for Thought Gene. It explains w
 
 ### Current branch
 
-`feature/project-foundation`
+`feature/branch-management`
 
 ### Current milestone
 
-**Project chat foundation** — persistent default project, main branch, and messages in Cloudflare D1.
+**Branch management** — create and switch between persistent branches within the default project.
 
-**Status:** **Verified locally.** D1 schema, workspace bootstrap, and persisted chat work end-to-end: `pnpm dev` → `GET /api/workspace` → chat → browser refresh reloads history from D1. Manual D1 row counts matched expected message totals.
+**Status:** Implemented. Users can create branches (title, purpose, parent relationship), switch between active branches, and each branch keeps its own D1 message history. Active branch selection persists in `localStorage` across refresh.
 
 ### Current goals
 
-- Store projects, branches, and messages in D1
-- Auto-create a default project with a Main branch
-- Load persisted messages on app start
-- Persist each chat turn (user + assistant) through the Worker
-- Keep chat UI presentational and modular for future branch UI
+- List active branches for the default project
+- Create new branches with title, purpose, and parent branch
+- Switch branches and load per-branch message history from D1
+- Keep chat UI presentational; orchestration in hooks and services
 
 ### Completed work
 
-- pnpm + Vite + React + TypeScript scaffold
-- Modular chat UI (message list, input, loading/error states)
-- Hono Worker with `GET /api/workspace` and `POST /api/chat`
-- Workers AI integration via `[ai]` binding
-- Cloudflare D1 binding with migrations for `projects`, `branches`, `messages`
-- Default project + Main branch get-or-create on workspace load
-- Message persistence and reload on browser refresh
-- Shared types in `shared/chat.ts` and `shared/workspace.ts`
-- DB access modules, services, and route separation
-- Workers AI model: `@cf/meta/llama-3.1-8b-instruct-fast`
-- **Local verification (2026):** Default Project + Main branch load in UI; messages persist across refresh; D1 `COUNT(*)` matched UI message count
+- All `feature/project-foundation` work (D1, workspace bootstrap, persisted chat)
+- `GET /api/workspace?branchId=` — project, branch list, selected branch, messages
+- `POST /api/branches` — create branch with title, purpose, parentBranchId
+- Branch sidebar UI (`BranchList`, `CreateBranchForm`)
+- `localStorage` for last-selected branch across refresh
+- DB: `listActiveBranchesByProject`, `createBranch`
+- Services: `branch-service`, evolved `workspace-service`
 
 ### Remaining work (future branches)
 
-- Multiple project UI and project creation flows
-- Branch creation, switching, and closure UI
+- Branch closure and `closed` branch handling
+- Create branch from specific message (`source_message_id`)
+- Branch context injection (`context_summary`, parent message seeding)
+- AI-suggested branch metadata
+- Multiple project UI
 - Artifact extraction and project memory dashboard
 - Markdown rendering and streaming responses
 - Authentication and deployment hardening
@@ -53,7 +51,8 @@ This document is the canonical engineering guide for Thought Gene. It explains w
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │                        Browser (React)                       │
-│  useWorkspace → GET /api/workspace                           │
+│  useWorkspace → GET /api/workspace?branchId=                 │
+│  BranchList / CreateBranchForm → POST /api/branches            │
 │  ChatPanel → useChat → POST /api/chat                        │
 └─────────────────────────────┬───────────────────────────────┘
                               │ HTTP JSON
@@ -77,19 +76,21 @@ Static assets (HTML, JS, CSS) are built by Vite and served through Cloudflare As
 
 ### Frontend responsibilities
 
-- Load workspace on mount (`useWorkspace`)
+- Load workspace on mount (`useWorkspace`) with optional stored `branchId`
+- Render branch list and create-branch form
+- Switch branches and reload per-branch messages from D1
 - Render chat UI and manage in-session message state (`useChat`)
 - Send new user turns to `POST /api/chat` with real `projectId` / `branchId`
-- Show loading and error states for workspace and chat
+- Show loading and error states for workspace, branch switch, and chat
 - Stay free of Workers AI, D1, or SQL logic
 
 ### Backend responsibilities
 
 - Bootstrap default project + Main branch (`GET /api/workspace`)
-- Validate chat requests (`parseChatRequest`)
-- Persist messages to D1, load branch history for AI context
-- Call Workers AI through the `AI` binding
-- Return JSON workspace or chat turn responses
+- List active branches and resolve selected branch (`?branchId=`)
+- Create branches (`POST /api/branches`) with title, purpose, parent
+- Validate chat requests and persist messages per branch
+- Call Workers AI with branch-scoped history from D1
 
 ### Cloudflare responsibilities
 
@@ -102,41 +103,83 @@ Static assets (HTML, JS, CSS) are built by Vite and served through Cloudflare As
 
 **App startup**
 
-1. `useWorkspace` calls `GET /api/workspace`.
-2. Worker get-or-creates **Default Project** and **Main** branch in D1.
-3. Worker loads all messages for the main branch.
-4. UI renders chat with persisted history.
+1. `useWorkspace` reads `localStorage` for last `branchId` (if any).
+2. Calls `GET /api/workspace?branchId=...`.
+3. Worker get-or-creates **Default Project** and **Main** branch.
+4. Worker returns project, active branch list, selected branch, and its messages.
+5. UI renders branch sidebar + chat for selected branch.
+
+**Create branch**
+
+1. User enters title + purpose in `CreateBranchForm`.
+2. `POST /api/branches` with `{ projectId, title, purpose, parentBranchId }`.
+3. `parentBranchId` defaults to the currently selected branch.
+4. Worker inserts new `active` branch row (no messages copied).
+5. UI switches to the new branch (empty chat).
+
+**Switch branch**
+
+1. User clicks a branch in `BranchList`.
+2. `GET /api/workspace?branchId=<id>` loads that branch's messages.
+3. `localStorage` updated with selected `branchId`.
+4. `ChatPanel` remounts (`key={branch.id}`) with new `initialMessages`.
 
 **Send message**
 
 1. User types a message and clicks Send.
-2. `useChat` calls `POST /api/chat` with `{ projectId, branchId, content }`.
-3. Worker validates project/branch, inserts user message into D1.
-4. Worker loads full branch history from D1.
-5. `runChatModel` calls Workers AI with stored history.
-6. Worker inserts assistant message into D1.
-7. Worker returns `{ reply, userMessage, assistantMessage }`.
-8. UI appends both persisted messages.
+2. `POST /api/chat` with `{ projectId, branchId, content }`.
+3. Worker persists user message, loads **this branch's** history, calls Workers AI.
+4. Worker persists assistant message and returns both records.
+5. UI appends messages.
 
-**Refresh:** Step 1 reloads messages from D1 — conversation is preserved.
+**Refresh:** Workspace reload uses stored `branchId` — same branch and history restored.
 
 ---
 
-## Chat API Contract
+## API Contract
 
 ### `GET /api/workspace`
 
-Returns the default project, its Main branch, and all persisted messages.
+Optional query: `?branchId=<uuid>`
 
 ```ts
 type WorkspaceResponse = {
   project: ProjectRecord;
-  branch: BranchRecord;
-  messages: StoredMessage[];
+  branches: BranchSummary[];
+  branch: BranchRecord;        // selected branch
+  messages: StoredMessage[];   // messages for selected branch only
+};
+
+type BranchSummary = {
+  id: string;
+  title: string;
+  purpose: string;
+  status: "active" | "ready_to_close" | "closed";
+  parentBranchId: string | null;
+  createdAt: string;
 };
 ```
 
-On first access, creates **Default Project** and a **Main** branch if they do not exist.
+- Returns all **active** branches for the default project.
+- If `branchId` is missing, invalid, or not active → falls back to **Main**.
+- On first access, creates **Default Project** and **Main** branch if needed.
+
+### `POST /api/branches`
+
+```ts
+type CreateBranchRequest = {
+  projectId: string;
+  title: string;
+  purpose: string;
+  parentBranchId?: string;   // defaults to Main if omitted at service layer
+};
+
+type CreateBranchResponse = {
+  branch: BranchRecord;
+};
+```
+
+Creates an `active` branch with `parent_branch_id` set. Does **not** set `source_message_id` or `context_summary`.
 
 ### `POST /api/chat`
 
@@ -175,14 +218,21 @@ type ChatResponse = {
 
 The previous API accepted full client history. With D1 persistence, the server loads history from the database to avoid drift, duplicate IDs, and tampering. The client receives server-generated message IDs after each turn.
 
-### Default project and Main branch
+### Default project and branch bootstrap
 
 | Entity | Default | How created |
 |--------|---------|-------------|
 | Project | name: `"Default Project"` | `getOrCreateDefaultProject()` on workspace load |
-| Branch | title: `"Main"`, purpose: `"Main project conversation"`, status: `"active"` | `getOrCreateMainBranch()` for that project |
+| Main branch | title: `"Main"`, purpose: `"Main project conversation"` | `getOrCreateMainBranch()` for that project |
+| User branches | title + purpose from form | `POST /api/branches`; parent = current branch unless specified |
 
-Real UUIDs are generated in the Worker. No hardcoded placeholder IDs at runtime.
+### Active branch persistence (client)
+
+Key: `thought-gene:activeBranchId` in `localStorage`.
+
+- Set after successful workspace load or branch create/switch.
+- Cleared if server returns a different branch than requested (stale id).
+- Falls back to Main when no stored id or invalid id.
 
 Shared definitions: `shared/workspace.ts`, `shared/chat.ts`.
 
@@ -518,34 +568,49 @@ curl http://localhost:5173/api/workspace
 
 Expect JSON with `project`, `branch`, and `messages` arrays. On first load, `messages` is `[]`; after chatting, it contains persisted rows.
 
-**2. Chat + Workers AI**
+Expect JSON with `project`, `branches`, `branch`, and `messages`. On first load, `branches` includes Main; `messages` is `[]` until you chat.
 
-- Send a user message; confirm an assistant reply appears
-- Send a second message; confirm multi-turn context works (assistant sees prior messages via D1 history)
+**2. Branch creation**
 
-**3. Persistence across refresh**
+- In the sidebar, enter a title (e.g. `Data Storage`) and purpose
+- Click **Create branch**
+- UI switches to the new branch with an empty chat
+- Main branch should still appear in the branch list
 
-- Send one or more messages
-- Hard-refresh the browser (F5 or Ctrl+R)
-- Confirm the same messages reappear without re-sending
-
-**4. D1 row count (optional sanity check)**
-
-Count messages in the **local** D1 database:
+Optional API check:
 
 ```powershell
-pnpm wrangler d1 execute thought-gene-db --local --command "SELECT COUNT(*) AS count FROM messages;"
+curl -X POST http://localhost:5173/api/branches `
+  -H "Content-Type: application/json" `
+  -d "{\"projectId\":\"YOUR_PROJECT_ID\",\"title\":\"API Design\",\"purpose\":\"Explore API shape for MVP\"}"
 ```
 
-The count should match the number of messages shown in the UI (user + assistant rows). After *N* successful chat turns, expect **2N** message rows.
+**3. Branch switching + isolated history**
 
-To inspect rows:
+- On **Main**, send a message (e.g. “This is the main thread”)
+- Switch to another branch; send a different message
+- Switch back to **Main** — only Main's messages should appear
+- Refresh the browser — same active branch and history should reload
+
+**4. Chat + Workers AI**
+
+- Send messages in any branch; confirm assistant replies
+- Multi-turn context is scoped to the **current branch only**
+
+**5. Persistence across refresh**
+
+- Select a non-Main branch, send messages, refresh
+- Confirm you return to that branch with its history (`localStorage`)
+
+**6. D1 row count (optional)**
 
 ```powershell
-pnpm wrangler d1 execute thought-gene-db --local --command "SELECT id, role, substr(content, 1, 40) AS preview, created_at FROM messages ORDER BY created_at;"
+pnpm wrangler d1 execute thought-gene-db --local --command "SELECT branch_id, COUNT(*) AS count FROM messages GROUP BY branch_id;"
 ```
 
-**5. curl chat turn (optional)**
+Each branch with chat activity should have its own row count.
+
+**7. curl chat turn (optional)**
 
 Use `projectId` and `branchId` from the workspace response:
 
@@ -561,10 +626,12 @@ Expected: `{ "reply", "userMessage", "assistantMessage" }` with server-generated
 
 | Check | Result |
 |-------|--------|
-| Default Project + Main branch in UI | Pass |
-| Messages saved to D1 on send | Pass |
-| Browser refresh preserves history | Pass |
-| D1 `COUNT(*)` matches UI message count | Pass |
+| Default Project + Main branch in UI | Pass (project-foundation) |
+| Messages saved to D1 on send | Pass (project-foundation) |
+| Browser refresh preserves history | Pass (project-foundation) |
+| Create branch with title + purpose | Pass (branch-management) |
+| Switch branches loads correct history | Pass (branch-management) |
+| Per-branch messages isolated in D1 | Pass (branch-management) |
 
 ---
 
@@ -578,22 +645,27 @@ thought-gene/
 │   ├── chat.ts              # Chat API types
 │   └── workspace.ts         # Workspace API types
 ├── worker/src/
-│   ├── db/                  # D1 queries (projects, branches, messages)
-│   ├── services/            # workspace-service, chat-service
+│   ├── db/                  # projects, branches, messages
+│   ├── services/            # workspace, branch, chat services
 │   ├── routes/
 │   │   ├── workspace.ts     # GET /api/workspace
+│   │   ├── branches.ts      # POST /api/branches
 │   │   └── chat.ts          # POST /api/chat
 │   ├── validation/
 │   ├── ai/run-chat.ts
-│   └── types/env.ts         # WorkerEnv: AI, DB, vars
+│   └── types/env.ts
 ├── src/
 │   ├── api/
 │   │   ├── workspace-client.ts
+│   │   ├── branches-client.ts
 │   │   └── chat-client.ts
 │   ├── hooks/
 │   │   ├── use-workspace.ts
 │   │   └── use-chat.ts
-│   └── components/chat/     # Presentational UI (unchanged pattern)
+│   ├── lib/branch-storage.ts
+│   └── components/
+│       ├── branches/        # BranchList, CreateBranchForm
+│       └── chat/            # Presentational chat UI
 ├── wrangler.toml            # AI + D1 bindings
 └── package.json             # db:migrate:local / db:migrate:remote scripts
 ```
@@ -651,11 +723,29 @@ Moving these into subfolders would fight tool defaults without a clear maintaina
 
 **Alternatives:** SQL inline in routes. Rejected — harder to test and extend.
 
-### Decision: `GET /api/workspace` bootstrap
+### Decision: `GET /api/workspace` bootstrap with branch list
 
-**Why:** Single endpoint for default project + Main branch + messages without project picker UI.
+**Why:** Single endpoint returns project, active branches, selected branch, and messages — avoids N+1 fetches for single-project app.
 
-**Alternatives:** Separate project CRUD endpoints. Deferred — out of scope for this branch.
+**Alternatives:** Separate `GET /api/branches` and `GET /api/branches/:id/messages`. Deferred until multi-project or heavy branch lists.
+
+### Decision: `localStorage` for active branch
+
+**Why:** Minimal persistence of UI selection across refresh without server-side user preferences or URL routing.
+
+**Alternatives:** URL `?branch=` query param. Deferred — better for deep links later.
+
+### Decision: Manual branch creation only (title + purpose)
+
+**Why:** Smallest path to multiple persistent conversations; matches this milestone scope.
+
+**Alternatives:** Create from message, AI-suggested metadata. Deferred per MVP sequencing.
+
+### Decision: New branches start with empty message history
+
+**Why:** Clean per-branch conversations; parent relationship stored via `parent_branch_id` only.
+
+**Alternatives:** Copy parent messages or inject `context_summary`. Deferred to branch-context milestone.
 
 ### Decision: Shared types in `shared/chat.ts` and `shared/workspace.ts`
 
@@ -698,28 +788,28 @@ Moving these into subfolders would fight tool defaults without a clear maintaina
 | Limitation | Notes |
 |------------|-------|
 | Single default project only | No project picker or multi-project UI |
-| Main branch only in UI | Branches table exists; no create/switch/close UI |
-| All messages loaded at once | No pagination; fine for early chats |
+| No branch closure UI | `closed` branches not listed; closure flow deferred |
+| No create-from-message | `source_message_id` column unused |
+| No branch context seeding | `context_summary` unused; new branches have empty chat |
+| Active branch in localStorage only | No URL deep links; cleared if stale |
+| All messages loaded per branch | No pagination |
 | No auth | Single shared D1 workspace for all visitors |
-| User message persisted before AI | If AI fails, user message remains in DB without assistant reply |
-| No streaming | Full response returned at once |
-| No markdown rendering | Plain pre-wrapped text |
-| System role not shown | Type supports `system`; UI renders user and assistant only |
+| User message persisted before AI | If AI fails, user message remains without assistant reply |
+| No streaming / markdown | Plain text responses |
 | `database_id` setup required | Each developer runs `wrangler d1 create` and migrates locally |
-| `account_id` in wrangler.toml | Each developer sets locally |
-| No automated tests | Manual smoke test only |
 | Deprecated model IDs | Update `CLOUDFLARE_AI_MODEL` if Workers AI returns 5028 |
-| Race on first workspace load | Rare duplicate default projects if two tabs bootstrap simultaneously |
 
 ### Future improvements
 
-- Multiple projects and branch switcher UI
-- Branch creation, closure, and artifact extraction
-- Paginated message history
-- Streaming responses
-- Markdown rendering for assistant messages
+- Branch closure and closed-branch history
+- Create branch from message (`source_message_id`)
+- Branch context injection (`context_summary`, parent history seeding)
+- Multiple projects UI
+- Artifact extraction and project memory
+- URL routing for branches
+- Streaming and markdown rendering
 - Auth and per-user workspaces
 
 ---
 
-*Last updated: local D1 persistence verified on `feature/project-foundation`.*
+*Last updated: branch management on `feature/branch-management`.*

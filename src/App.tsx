@@ -1,8 +1,22 @@
+import { BranchList } from "./components/branches/BranchList";
+import { CreateBranchForm } from "./components/branches/CreateBranchForm";
 import { ChatPanel } from "./components/chat/ChatPanel";
 import { useWorkspace } from "./hooks/use-workspace";
 
 export default function App() {
-  const { workspace, isLoading, error, reload, clearError } = useWorkspace();
+  const {
+    workspace,
+    isLoading,
+    isSwitching,
+    isCreating,
+    error,
+    selectBranch,
+    createBranch,
+    reload,
+    clearError,
+  } = useWorkspace();
+
+  const branchBusy = isSwitching || isCreating;
 
   return (
     <div className="app">
@@ -34,11 +48,34 @@ export default function App() {
         )}
 
         {!isLoading && workspace && (
-          <ChatPanel
-            projectId={workspace.project.id}
-            branchId={workspace.branch.id}
-            initialMessages={workspace.messages}
-          />
+          <div className="workspace-layout">
+            <aside className="branch-sidebar">
+              <BranchList
+                branches={workspace.branches}
+                activeBranchId={workspace.branch.id}
+                disabled={branchBusy}
+                onSelect={(branchId) => void selectBranch(branchId)}
+              />
+              <CreateBranchForm
+                disabled={branchBusy}
+                onCreate={createBranch}
+              />
+            </aside>
+            <div className="workspace-chat">
+              {isSwitching && (
+                <div className="workspace-status workspace-status-inline" role="status">
+                  <p>Switching branch…</p>
+                </div>
+              )}
+              <ChatPanel
+                key={workspace.branch.id}
+                projectId={workspace.project.id}
+                branchId={workspace.branch.id}
+                initialMessages={workspace.messages}
+                disabled={branchBusy}
+              />
+            </div>
+          </div>
         )}
       </main>
     </div>

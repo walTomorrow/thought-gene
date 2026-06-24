@@ -5,8 +5,10 @@ import type { WorkerEnv } from "../types/env";
 const workspaceRoutes = new Hono<{ Bindings: WorkerEnv }>();
 
 workspaceRoutes.get("/workspace", async (context) => {
+  const branchId = context.req.query("branchId");
+
   try {
-    const workspace = await loadWorkspace(context.env);
+    const workspace = await loadWorkspace(context.env, branchId);
     return context.json(workspace);
   } catch (error) {
     const errorMessage =
