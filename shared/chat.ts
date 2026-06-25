@@ -4,6 +4,8 @@
 
 export type MessageRole = "user" | "assistant" | "system";
 
+export type MessageKind = "chat" | "merge_packet";
+
 export type ChatMessageInput = {
   role: MessageRole;
   content: string;
@@ -16,6 +18,8 @@ export type StoredMessage = {
   branchId: string;
   role: MessageRole;
   content: string;
+  messageKind: MessageKind;
+  mergeId: string | null;
   createdAt: string;
 };
 

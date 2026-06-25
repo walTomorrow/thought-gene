@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { branchRoutes } from "./routes/branches";
 import { chatRoutes } from "./routes/chat";
+import { mergeRoutes } from "./routes/merges";
 import { workspaceRoutes } from "./routes/workspace";
 import type { WorkerEnv } from "./types/env";
 
@@ -12,6 +13,7 @@ const app = new Hono<{ Bindings: WorkerEnv }>();
 
 app.route("/api", workspaceRoutes);
 app.route("/api", branchRoutes);
+app.route("/api", mergeRoutes);
 app.route("/api", chatRoutes);
 
 export default app;

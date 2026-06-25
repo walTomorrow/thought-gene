@@ -10,6 +10,7 @@ type ChatPanelProps = {
   initialMessages: ChatMessage[];
   disabled?: boolean;
   readOnly?: boolean;
+  highlightMessageId?: string | null;
 };
 
 /**
@@ -21,6 +22,7 @@ export function ChatPanel({
   initialMessages,
   disabled = false,
   readOnly = false,
+  highlightMessageId = null,
 }: ChatPanelProps) {
   const { messages, isLoading, error, sendMessage, clearError } = useChat({
     projectId,
@@ -37,7 +39,11 @@ export function ChatPanel({
           Viewing closed branch — sending messages is disabled.
         </p>
       )}
-      <MessageList messages={messages} />
+      <MessageList
+        messages={messages}
+        projectId={projectId}
+        highlightMessageId={highlightMessageId}
+      />
       <ChatStatus
         isLoading={isLoading}
         error={error}

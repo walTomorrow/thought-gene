@@ -1,23 +1,39 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { BranchRecord } from "../../types/message";
 import { isRootBranch } from "../../types/message";
+import type { BranchMergeSummary } from "../../types/message";
+import { MergeHistoryList } from "./MergeHistoryList";
 
 type BranchDetailsPanelProps = {
   branch: BranchRecord;
   isReadOnly: boolean;
   disabled: boolean;
+  canMerge: boolean;
+  hasDraft: boolean;
+  isGeneratingMerge: boolean;
   onUpdate: (input: { title: string; purpose: string }) => Promise<void>;
   onClose: () => Promise<void>;
   onReopen: () => Promise<void>;
+  onMerge: () => Promise<void>;
+  onResumeMergeDraft: () => void;
+  mergeHistory: BranchMergeSummary[];
+  mergeHistoryLoading: boolean;
 };
 
 export function BranchDetailsPanel({
   branch,
   isReadOnly,
   disabled,
+  canMerge,
+  hasDraft,
+  isGeneratingMerge,
   onUpdate,
   onClose,
   onReopen,
+  onMerge,
+  onResumeMergeDraft,
+  mergeHistory,
+  mergeHistoryLoading,
 }: BranchDetailsPanelProps) {
   const [title, setTitle] = useState(branch.title);
   const [purpose, setPurpose] = useState(branch.purpose);
@@ -29,6 +45,7 @@ export function BranchDetailsPanel({
 
   const canEdit = !isReadOnly;
   const canClose = !isReadOnly && !isRootBranch(branch);
+  const canMergeToParent = canMerge && !isRootBranch(branch) && !!branch.parentBranchId;
   const isDirty =
     title.trim() !== branch.title || purpose.trim() !== branch.purpose;
 
@@ -88,6 +105,28 @@ export function BranchDetailsPanel({
       </form>
 
       <div className="branch-details-actions">
+        {canMergeToParent && (
+          <>
+            <button
+              className="branch-details-merge"
+              type="button"
+              disabled={disabled || isGeneratingMerge}
+              onClick={() => void onMerge()}
+            >
+              {isGeneratingMerge ? "Preparing merge…" : "Merge to parent"}
+            </button>
+            {hasDraft && (
+              <button
+                className="branch-details-merge-draft"
+                type="button"
+                disabled={disabled || isGeneratingMerge}
+                onClick={onResumeMergeDraft}
+              >
+                Resume merge
+              </button>
+            )}
+          </>
+        )}
         {canClose && (
           <button
             className="branch-details-close"
@@ -109,6 +148,10 @@ export function BranchDetailsPanel({
           </button>
         )}
       </div>
+
+      {!isRootBranch(branch) && (
+        <MergeHistoryList merges={mergeHistory} isLoading={mergeHistoryLoading} />
+      )}
     </section>
   );
 }

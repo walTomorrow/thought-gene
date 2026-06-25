@@ -4,3 +4,7 @@
 
 # Current project default: @cf/meta/llama-3.1-8b-instruct-fast
 CLOUDFLARE_AI_MODEL=@cf/meta/llama-3.1-8b-instruct-fast
+
+# Workers AI defaults max_tokens to 256 unless overridden:
+# CLOUDFLARE_AI_MAX_TOKENS=2048
+# CLOUDFLARE_AI_MERGE_MAX_TOKENS=4096

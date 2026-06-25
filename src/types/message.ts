@@ -32,5 +32,12 @@ export type {
 
 export { isRootBranch } from "../../shared/workspace";
 
+export type {
+  BranchMergeRecord,
+  BranchMergeSummary,
+  MergeItem,
+  MergePacket,
+} from "../../shared/merge";
+
 /** UI message — same shape as StoredMessage from the API. */
 export type ChatMessage = StoredMessage;

@@ -429,3 +429,462 @@ textarea:disabled {
   padding: 0.25rem 0.75rem;
   cursor: pointer;
 }
+
+.branch-details-merge,
+.branch-details-merge-draft {
+  border: 1px solid #a5b4fc;
+  background: #eef2ff;
+  color: #3730a3;
+  border-radius: 0.375rem;
+  padding: 0.35rem 0.65rem;
+  cursor: pointer;
+}
+
+.merge-history {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e4e4e7;
+}
+
+.merge-history-heading {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #71717a;
+}
+
+.merge-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.merge-history-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  font-size: 0.85rem;
+}
+
+.merge-history-item-meta {
+  color: #71717a;
+}
+
+.message-bubble-highlighted {
+  box-shadow: 0 0 0 2px #6366f1;
+}
+
+/* Merge confirm dialog */
+
+.merge-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(24, 24, 27, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 50;
+}
+
+.merge-dialog {
+  width: min(440px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  padding: 1.25rem;
+  border-radius: 0.85rem;
+  background: #ffffff;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.18);
+  animation: merge-slide-up 200ms ease-out;
+}
+
+@keyframes merge-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.merge-dialog-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 1.5rem 0.5rem;
+  gap: 0.5rem;
+}
+
+.merge-dialog-spinner {
+  width: 2rem;
+  height: 2rem;
+  border: 3px solid #e4e4e7;
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: merge-spin 700ms linear infinite;
+}
+
+@keyframes merge-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.merge-dialog-loading-text {
+  margin: 0.5rem 0 0;
+  font-weight: 600;
+  color: #18181b;
+}
+
+.merge-dialog-loading-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #71717a;
+  max-width: 18rem;
+}
+
+.merge-dialog-eyebrow {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #71717a;
+}
+
+.merge-dialog-title {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+  line-height: 1.35;
+}
+
+.merge-dialog-lead {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: #52525b;
+}
+
+.merge-dialog-warnings {
+  margin: 0 0 0.75rem;
+  padding: 0.65rem 0.85rem;
+  background: #fffbeb;
+  color: #92400e;
+  border-radius: 0.375rem;
+  font-size: 0.85rem;
+  list-style: disc;
+  padding-left: 1.5rem;
+}
+
+.merge-remember-list {
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+  color: #27272a;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.merge-remember-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.merge-remember-check {
+  color: #16a34a;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.merge-dialog-primary,
+.merge-dialog-secondary,
+.merge-dialog-muted {
+  display: block;
+  width: 100%;
+  margin-bottom: 0.5rem;
+  padding: 0.55rem 0.85rem;
+  border-radius: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.merge-dialog-primary {
+  background: #3730a3;
+  color: #ffffff;
+  border: none;
+}
+
+.merge-dialog-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.merge-dialog-secondary {
+  background: #f4f4f5;
+  color: #27272a;
+  border: 1px solid #e4e4e7;
+}
+
+.merge-dialog-muted {
+  background: transparent;
+  color: #71717a;
+  border: none;
+  font-weight: 500;
+}
+
+.merge-dialog-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  font-size: 0.82rem;
+  color: #71717a;
+}
+
+.merge-dialog-review {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #f4f4f5;
+  max-height: 320px;
+  overflow: auto;
+  animation: merge-fade-in 160ms ease-out;
+}
+
+@keyframes merge-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.merge-dialog-review-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.75rem;
+}
+
+.merge-dialog-edit {
+  padding: 0.25rem 0.5rem;
+  border: none;
+  background: none;
+  color: #4338ca;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.merge-dialog-edit:hover {
+  text-decoration: underline;
+}
+
+.merge-dialog-review .merge-doc {
+  font-size: 0.85rem;
+}
+
+/* Merge chat card */
+
+.merge-chat-card {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-radius: 0.75rem;
+  background: linear-gradient(135deg, #eef2ff, #f5f3ff);
+  border: 1px solid #c7d2fe;
+  align-self: stretch;
+  animation: merge-fade-in 220ms ease-out;
+}
+
+.merge-chat-card-icon {
+  font-size: 1.25rem;
+  line-height: 1;
+  color: #4f46e5;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+.merge-chat-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.merge-chat-card-label {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #4338ca;
+}
+
+.merge-chat-card-teaser {
+  margin: 0.35rem 0 0.5rem;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: #18181b;
+}
+
+.merge-chat-card-toggle {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #4338ca;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.merge-chat-card-toggle:hover {
+  text-decoration: underline;
+}
+
+.merge-chat-card-details {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(99, 102, 241, 0.25);
+  animation: merge-fade-in 180ms ease-out;
+}
+
+.merge-chat-card-details .merge-doc {
+  background: rgba(255, 255, 255, 0.65);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.merge-chat-card-expanded {
+  box-shadow: 0 4px 16px rgba(79, 70, 229, 0.12);
+}
+
+.merge-chat-card-status {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: #71717a;
+}
+
+.merge-chat-card-error {
+  color: #b91c1c;
+}
+
+/* Merge packet document */
+
+.merge-doc {
+  font-family: Georgia, "Times New Roman", serif;
+  color: #27272a;
+  line-height: 1.55;
+}
+
+.merge-doc-header {
+  margin-bottom: 1.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #f4f4f5;
+}
+
+.merge-doc-eyebrow {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #a1a1aa;
+}
+
+.merge-doc-title {
+  margin: 0.25rem 0 0;
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+.merge-doc-purpose {
+  margin: 0.5rem 0 0;
+  font-family: system-ui, sans-serif;
+  font-size: 0.85rem;
+  color: #71717a;
+}
+
+.merge-doc-section {
+  margin-bottom: 1.25rem;
+}
+
+.merge-doc-section-title {
+  margin: 0 0 0.5rem;
+  font-family: system-ui, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #71717a;
+}
+
+.merge-doc-item {
+  margin-bottom: 0.75rem;
+}
+
+.merge-doc-item-title {
+  margin: 0 0 0.2rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.merge-doc-item-body {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #3f3f46;
+}
+
+/* Merge packet editor (advanced) */
+
+.merge-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.merge-editor-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.merge-editor-textarea,
+.merge-editor-input {
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid #d4d4d8;
+  border-radius: 0.375rem;
+  font-family: system-ui, sans-serif;
+  font-size: 0.85rem;
+}
+
+.merge-editor-section {
+  border-top: 1px solid #f4f4f5;
+  padding-top: 0.75rem;
+}
+
+.merge-editor-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.merge-editor-section-header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.merge-editor-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.65rem;
+}
+
+.merge-editor-remove {
+  align-self: flex-start;
+  font-size: 0.8rem;
+}
