@@ -3,6 +3,7 @@ import {
   confirmBranchMergeDraft,
   discardBranchMergeDraft,
   generateBranchMerge,
+  getBranchMerge,
   listBranchMerges,
   updateBranchMerge,
 } from "../services/merge-service";
@@ -15,6 +16,30 @@ import {
 } from "../validation/parse-merge-request";
 
 const mergeRoutes = new Hono<{ Bindings: WorkerEnv }>();
+
+mergeRoutes.get("/merges/:mergeId", async (context) => {
+  const mergeId = context.req.param("mergeId");
+  const parsed = parseMergeProjectQuery(context.req.query("projectId"));
+  if (!parsed.ok) {
+    return context.json({ error: parsed.error }, 400);
+  }
+
+  try {
+    const merge = await getBranchMerge(
+      context.env,
+      mergeId,
+      parsed.value.projectId,
+    );
+    return context.json({ merge });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Failed to load merge.";
+    if (errorMessage.includes("not found")) {
+      return context.json({ error: errorMessage }, 404);
+    }
+    return context.json({ error: errorMessage }, 500);
+  }
+});
 
 mergeRoutes.get("/branches/:childBranchId/merges", async (context) => {
   const childBranchId = context.req.param("childBranchId");

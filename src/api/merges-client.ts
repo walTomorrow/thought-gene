@@ -3,6 +3,7 @@ import type {
   ConfirmMergeResponse,
   GenerateMergeRequest,
   GenerateMergeResponse,
+  GetMergeResponse,
   ListMergesResponse,
   MergePacket,
   UpdateMergeRequest,
@@ -47,6 +48,17 @@ export async function listBranchMerges(
     `/api/branches/${encodeURIComponent(childBranchId)}/merges?${params}`,
   );
   return parseJsonResponse(response, "Failed to load merge history.");
+}
+
+export async function getBranchMerge(
+  mergeId: string,
+  projectId: string,
+): Promise<GetMergeResponse> {
+  const params = new URLSearchParams({ projectId });
+  const response = await fetch(
+    `/api/merges/${encodeURIComponent(mergeId)}?${params}`,
+  );
+  return parseJsonResponse(response, "Failed to load merge.");
 }
 
 export async function generateBranchMerge(

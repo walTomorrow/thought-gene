@@ -4,11 +4,13 @@ import { MessageBubble } from "./MessageBubble";
 
 type MessageListProps = {
   messages: ChatMessage[];
+  projectId: string;
   highlightMessageId?: string | null;
 };
 
 export function MessageList({
   messages,
+  projectId,
   highlightMessageId = null,
 }: MessageListProps) {
   const listRef = useRef<HTMLUListElement>(null);
@@ -40,6 +42,7 @@ export function MessageList({
         <li key={message.id}>
           <MessageBubble
             message={message}
+            projectId={projectId}
             highlighted={message.id === highlightMessageId}
           />
         </li>

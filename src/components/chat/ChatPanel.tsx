@@ -41,6 +41,7 @@ export function ChatPanel({
       )}
       <MessageList
         messages={messages}
+        projectId={projectId}
         highlightMessageId={highlightMessageId}
       />
       <ChatStatus

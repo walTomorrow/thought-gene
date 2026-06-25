@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   confirmBranchMerge,
-  discardBranchMerge,
   generateBranchMerge,
   listBranchMerges,
   updateBranchMerge,
@@ -27,21 +26,21 @@ type UseBranchMergeOptions = {
 type UseBranchMergeResult = {
   mergeHistory: BranchMergeSummary[];
   draft: BranchMergeRecord | null;
-  reviewOpen: boolean;
-  reviewPacket: MergePacket | null;
-  reviewMergeId: string | null;
+  dialogOpen: boolean;
+  dialogPhase: "loading" | "confirm";
+  mergePacket: MergePacket | null;
+  mergeId: string | null;
   warnings: string[];
   isLoadingHistory: boolean;
   isGenerating: boolean;
   isSaving: boolean;
   isConfirming: boolean;
   error: string | null;
-  openReview: () => void;
-  closeReview: () => void;
   startMerge: () => Promise<void>;
-  saveReview: (packet: MergePacket) => Promise<void>;
-  confirmReview: (closeChildAfter: boolean) => Promise<void>;
-  discardReview: () => Promise<void>;
+  resumeDraft: () => void;
+  closeDialog: () => void;
+  updatePacket: (packet: MergePacket) => void;
+  confirmMerge: (closeChildAfter: boolean) => Promise<void>;
   clearError: () => void;
 };
 
@@ -53,15 +52,19 @@ export function useBranchMerge({
 }: UseBranchMergeOptions): UseBranchMergeResult {
   const [mergeHistory, setMergeHistory] = useState<BranchMergeSummary[]>([]);
   const [draft, setDraft] = useState<BranchMergeRecord | null>(null);
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [reviewPacket, setReviewPacket] = useState<MergePacket | null>(null);
-  const [reviewMergeId, setReviewMergeId] = useState<string | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogPhase, setDialogPhase] = useState<"loading" | "confirm">(
+    "loading",
+  );
+  const [mergePacket, setMergePacket] = useState<MergePacket | null>(null);
+  const [mergeId, setMergeId] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const packetDirtyRef = useRef(false);
 
   const canMerge =
     !!branch &&
@@ -95,12 +98,14 @@ export function useBranchMerge({
     void loadHistory();
   }, [loadHistory]);
 
-  const openDraftReview = useCallback(
+  const openConfirmDialog = useCallback(
     (merge: BranchMergeRecord, mergeWarnings: string[] = []) => {
-      setReviewPacket(merge.packet);
-      setReviewMergeId(merge.id);
+      setMergePacket(merge.packet);
+      setMergeId(merge.id);
       setWarnings(mergeWarnings);
-      setReviewOpen(true);
+      setDialogPhase("confirm");
+      setDialogOpen(true);
+      packetDirtyRef.current = false;
     },
     [],
   );
@@ -110,31 +115,31 @@ export function useBranchMerge({
       return;
     }
 
+    setError(null);
+
     if (draft) {
-      const resume = window.confirm(
-        "A draft merge already exists. Open the existing draft? Click Cancel to replace it with a newly generated packet.",
-      );
-      if (resume) {
-        openDraftReview(draft, warnings);
-        return;
-      }
+      openConfirmDialog(draft, warnings);
+      return;
     }
 
+    setDialogOpen(true);
+    setDialogPhase("loading");
+
     setIsGenerating(true);
-    setError(null);
 
     try {
       const result = await generateBranchMerge(branch.id, {
         projectId,
-        replaceDraft: !!draft,
+        replaceDraft: false,
       });
       setDraft(result.merge);
-      openDraftReview(result.merge, result.warnings);
+      openConfirmDialog(result.merge, result.warnings);
       await loadHistory();
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to generate merge packet.";
       setError(message);
+      setDialogOpen(false);
     } finally {
       setIsGenerating(false);
     }
@@ -146,40 +151,27 @@ export function useBranchMerge({
     draft,
     warnings,
     loadHistory,
-    openDraftReview,
+    openConfirmDialog,
   ]);
 
-  const saveReview = useCallback(
-    async (packet: MergePacket) => {
-      if (!branch || !projectId || !reviewMergeId) {
-        return;
-      }
+  const resumeDraft = useCallback(() => {
+    if (draft) {
+      openConfirmDialog(draft, warnings);
+    }
+  }, [draft, openConfirmDialog, warnings]);
 
-      setIsSaving(true);
-      setError(null);
+  const closeDialog = useCallback(() => {
+    setDialogOpen(false);
+  }, []);
 
-      try {
-        const result = await updateBranchMerge(branch.id, reviewMergeId, {
-          projectId,
-          packet,
-        });
-        setDraft(result.merge);
-        setReviewPacket(result.merge.packet);
-        await loadHistory();
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Failed to save merge draft.";
-        setError(message);
-      } finally {
-        setIsSaving(false);
-      }
-    },
-    [branch, projectId, reviewMergeId, loadHistory],
-  );
+  const updatePacket = useCallback((packet: MergePacket) => {
+    setMergePacket(packet);
+    packetDirtyRef.current = true;
+  }, []);
 
-  const confirmReview = useCallback(
+  const confirmMerge = useCallback(
     async (closeChildAfter: boolean) => {
-      if (!branch || !projectId || !reviewMergeId || !reviewPacket) {
+      if (!branch || !projectId || !mergeId || !mergePacket) {
         return;
       }
 
@@ -187,14 +179,25 @@ export function useBranchMerge({
       setError(null);
 
       try {
-        await saveReview(reviewPacket);
-        const result = await confirmBranchMerge(branch.id, reviewMergeId, {
+        if (packetDirtyRef.current) {
+          setIsSaving(true);
+          const result = await updateBranchMerge(branch.id, mergeId, {
+            projectId,
+            packet: mergePacket,
+          });
+          setDraft(result.merge);
+          setMergePacket(result.merge.packet);
+          packetDirtyRef.current = false;
+          setIsSaving(false);
+        }
+
+        const result = await confirmBranchMerge(branch.id, mergeId, {
           projectId,
           closeChildAfter,
         });
-        setReviewOpen(false);
-        setReviewPacket(null);
-        setReviewMergeId(null);
+        setDialogOpen(false);
+        setMergePacket(null);
+        setMergeId(null);
         setDraft(null);
         setWarnings([]);
         await onConfirmed({
@@ -208,50 +211,11 @@ export function useBranchMerge({
         setError(message);
       } finally {
         setIsConfirming(false);
+        setIsSaving(false);
       }
     },
-    [
-      branch,
-      projectId,
-      reviewMergeId,
-      reviewPacket,
-      saveReview,
-      onConfirmed,
-      loadHistory,
-    ],
+    [branch, projectId, mergeId, mergePacket, onConfirmed, loadHistory],
   );
-
-  const discardReview = useCallback(async () => {
-    if (!branch || !projectId || !reviewMergeId) {
-      setReviewOpen(false);
-      return;
-    }
-
-    setError(null);
-    try {
-      await discardBranchMerge(branch.id, reviewMergeId, projectId);
-      setReviewOpen(false);
-      setReviewPacket(null);
-      setReviewMergeId(null);
-      setDraft(null);
-      setWarnings([]);
-      await loadHistory();
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to discard merge draft.";
-      setError(message);
-    }
-  }, [branch, projectId, reviewMergeId, loadHistory]);
-
-  const openReview = useCallback(() => {
-    if (draft) {
-      openDraftReview(draft, warnings);
-    }
-  }, [draft, openDraftReview, warnings]);
-
-  const closeReview = useCallback(() => {
-    setReviewOpen(false);
-  }, []);
 
   const clearError = useCallback(() => {
     setError(null);
@@ -260,21 +224,21 @@ export function useBranchMerge({
   return {
     mergeHistory,
     draft,
-    reviewOpen,
-    reviewPacket,
-    reviewMergeId,
+    dialogOpen,
+    dialogPhase,
+    mergePacket,
+    mergeId,
     warnings,
     isLoadingHistory,
     isGenerating,
     isSaving,
     isConfirming,
     error,
-    openReview,
-    closeReview,
     startMerge,
-    saveReview,
-    confirmReview,
-    discardReview,
+    resumeDraft,
+    closeDialog,
+    updatePacket,
+    confirmMerge,
     clearError,
   };
 }

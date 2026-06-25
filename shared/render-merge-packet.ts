@@ -1,4 +1,5 @@
 import type { MergeItem, MergePacket } from "./merge";
+import { getMergeTeaser } from "./merge-display";
 
 function renderItems(items: MergeItem[]): string {
   if (items.length === 0) {
@@ -55,4 +56,9 @@ export function renderMergePacketMarkdown(packet: MergePacket): string {
   );
 
   return lines.join("\n").trim();
+}
+
+/** Compact text stored on the parent chat message (teaser only). */
+export function renderMergeCardContent(packet: MergePacket): string {
+  return getMergeTeaser(packet);
 }

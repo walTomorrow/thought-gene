@@ -14,13 +14,14 @@ This document is the canonical engineering guide for Thought Gene. It explains w
 
 **Branch merges** — generate, review, and confirm parent-facing merge packets from child branches.
 
-**Status:** Implemented. Users can merge an active child branch into its parent: LLM generates a structured packet, user reviews/edits, confirm inserts a visible merge message in the parent chat, optionally closes the child, and the UI switches to the parent with the new message highlighted.
+**Status:** Implemented. Users can merge an active child branch into its parent: the assistant generates a structured packet, the user confirms via a lightweight dialog (optional document review/edit), confirm inserts a compact merge card in the parent chat, optionally closes the child, and the UI switches to the parent with the new message highlighted.
 
 ### Current goals
 
 - Generate structured merge packets from child branch context (Workers AI)
-- Review and edit packets before confirming
-- Insert merge packet messages into the parent branch (`message_kind=merge_packet`)
+- Lightweight confirm dialog with **remember bullets**; full document review is optional
+- Conversational **executive summary** for parent chat teasers (no meta “merge packet” language)
+- Insert compact merge cards into the parent branch (`message_kind=merge_packet`)
 - Track merge history per child branch (`branch_merges` table)
 - One draft per child; replace or resume existing draft
 - Block root merges and merges into closed parents
@@ -30,9 +31,10 @@ This document is the canonical engineering guide for Thought Gene. It explains w
 
 - All `feature/branch-management` work (branch lifecycle)
 - Migration `0002_branch_merges.sql` — `branch_merges` table; `messages.message_kind`, `messages.merge_id`
-- Merge API routes (`generate`, `PATCH` draft, `confirm`, `DELETE` discard, `GET` history)
+- Merge API routes (`generate`, `PATCH` draft, `confirm`, `DELETE` discard, `GET` history, `GET` merge by id)
 - `merge-service`, `merge-context`, `run-merge-packet`, `branch-merges` DB module
-- UI: **Merge to parent**, `MergeReviewModal`, `MergeHistoryList`, merge packet bubbles
+- `shared/merge-display.ts` — remember bullets, document sections, chat teaser helpers
+- UI: **Merge to parent**, `MergeConfirmDialog`, `MergeChatCard`, `MergePacketDocument`, `MergeHistoryList`
 - `docs/branch-merges.md` specification
 
 ### Remaining work (future branches)
@@ -42,7 +44,7 @@ This document is the canonical engineering guide for Thought Gene. It explains w
 - Branch context injection (`context_summary`, parent message seeding)
 - LLM-generated closure packets on branch close (`closure_summary`)
 - Multiple project UI
-- Markdown rendering for merge packets
+- Markdown rendering for chat bubbles (merge document view uses structured sections today)
 - Authentication and deployment hardening
 
 ### Intentionally out of scope
@@ -74,8 +76,8 @@ The following are **not** part of `feature/branch-management` and were explicitl
 │  BranchList (active) / ClosedBranchList / BranchDetailsPanel │
 │  CreateBranchForm → POST /api/branches                         │
 │  BranchDetailsPanel → PATCH, close, reopen, merge workflow      │
-│  MergeReviewModal → generate / edit / confirm merge packets      │
-│  ChatPanel → useChat → POST /api/chat (merge packets visible)  │
+│  MergeConfirmDialog → generate / confirm; optional document edit │
+│  ChatPanel → useChat → POST /api/chat (merge cards visible)    │
 └─────────────────────────────┬───────────────────────────────┘
                               │ HTTP JSON
                               ▼
@@ -214,6 +216,14 @@ Static assets (HTML, JS, CSS) are built by Vite and served through Cloudflare As
 5. Worker persists assistant message and returns both records.
 6. UI appends messages.
 
+**Merge to parent**
+
+1. User clicks **Merge to parent** on an active child branch (`BranchDetailsPanel`).
+2. `MergeConfirmDialog` opens. If no draft exists, `POST /api/branches/:childBranchId/merges/generate` runs Workers AI (see [LLM prompts](#llm-prompts-workers-ai)).
+3. User sees a lightweight confirm dialog: **remember bullets** (from LLM `rememberBullets` or derived client-side), **Merge & Continue**, optional **Review Merge ▼** (read-only document), optional **Edit** (advanced packet editor).
+4. On confirm, `POST .../merges/:mergeId/confirm` inserts a compact merge card into the parent branch (`messages.content` = `executiveSummary` teaser; full packet in `branch_merges.packet_json`).
+5. UI switches to the parent branch and highlights the new merge card. No LLM reply is posted to the parent after confirm.
+
 **Refresh:** Workspace reload uses stored `branchId` — same branch and history restored (including closed branches if that was the last selection).
 
 ---
@@ -325,6 +335,7 @@ This milestone only started **using** those columns; it did not change the schem
 | `PATCH` | `/api/branches/:branchId` | Update title and/or purpose |
 | `POST` | `/api/branches/:branchId/close` | Close non-root branch |
 | `POST` | `/api/branches/:branchId/reopen` | Reopen closed branch |
+| `GET` | `/api/merges/:mergeId?projectId=` | Fetch confirmed/draft merge (for merge card title + Review Merge) |
 | `GET` | `/api/branches/:childBranchId/merges?projectId=` | Merge history + active draft |
 | `POST` | `/api/branches/:childBranchId/merges/generate` | LLM generate draft packet |
 | `PATCH` | `/api/branches/:childBranchId/merges/:mergeId` | Update draft packet JSON |
@@ -575,7 +586,7 @@ Shared definitions: `shared/workspace.ts`, `shared/chat.ts`.
 
 **Problem it solves:** Structured routing without Express-style weight.
 
-**Interaction:** `worker/src/app.ts` mounts `/api/workspace`, `/api/branches`, and `/api/chat`.
+**Interaction:** `worker/src/app.ts` mounts `/api/workspace`, `/api/branches`, `/api/chat`, and merge routes under `/api/merges` and `/api/branches/:id/merges`.
 
 ### Workers AI
 
@@ -585,7 +596,107 @@ Shared definitions: `shared/workspace.ts`, `shared/chat.ts`.
 
 **Problem it solves:** LLM responses for chat without operating separate inference infrastructure.
 
-**Interaction:** `run-chat.ts` calls `env.AI.run(model, { messages })`; model ID from `CLOUDFLARE_AI_MODEL` (see Workers AI Model Configuration below).
+**Interaction:** Two call sites invoke `env.AI.run` — branch chat ([`run-chat.ts`](../worker/src/ai/run-chat.ts)) and merge packet generation ([`run-merge-packet.ts`](../worker/src/ai/run-merge-packet.ts)). See [LLM prompts](#llm-prompts-workers-ai) for the full prompt inventory.
+
+---
+
+## LLM prompts (Workers AI)
+
+This section is the **prompt-engineering reference**. It lists every place the Worker sends input to Workers AI, with links to the source files where prompts are defined or assembled.
+
+### Prompt inventory
+
+There are **two** Workers AI call sites today. No other code path invokes `env.AI.run`.
+
+| Use case | Service / route | Prompt assembly | Model invocation |
+|----------|-----------------|-----------------|------------------|
+| **Branch chat** | [`worker/src/services/chat-service.ts`](../worker/src/services/chat-service.ts) (`POST /api/chat`) | Branch history loaded from D1; mapped to `{ role, content }[]` — **no system prompt** | [`worker/src/ai/run-chat.ts`](../worker/src/ai/run-chat.ts) → `runChatModel()` |
+| **Merge packet** | [`worker/src/services/merge-service.ts`](../worker/src/services/merge-service.ts) (`POST .../merges/generate`) | Context strings from [`worker/src/services/merge-context.ts`](../worker/src/services/merge-context.ts); user prompt from `buildMergePrompt()` in [`worker/src/ai/run-merge-packet.ts`](../worker/src/ai/run-merge-packet.ts) | [`worker/src/ai/run-merge-packet.ts`](../worker/src/ai/run-merge-packet.ts) → `runMergePacketModel()` |
+
+### Supporting files (not direct LLM calls)
+
+| File | Role |
+|------|------|
+| [`worker/src/ai/ai-max-tokens.ts`](../worker/src/ai/ai-max-tokens.ts) | `max_tokens` for chat (default 2048) and merge (default 4096); overridable via `CLOUDFLARE_AI_MAX_TOKENS` / `CLOUDFLARE_AI_MERGE_MAX_TOKENS` |
+| [`worker/src/ai/workers-ai-response.ts`](../worker/src/ai/workers-ai-response.ts) | Parses Workers AI responses (text + structured JSON) |
+| [`worker/src/services/merge-context.ts`](../worker/src/services/merge-context.ts) | Formats parent/child conversations and prior merge summaries **injected into** the merge user prompt (not sent to the model on its own) |
+| [`shared/merge-display.ts`](../shared/merge-display.ts) | Client-side display helpers only (`getRememberBullets`, `getMergeTeaser`) — **not** LLM prompts |
+
+### 1. Branch chat
+
+**Call chain:** `routes/chat.ts` → `chat-service.sendChatTurn()` → `runChatModel()`
+
+**What is sent to the model:**
+
+```ts
+// worker/src/services/chat-service.ts — history after inserting the new user message
+const aiMessages = history.map((message) => ({
+  role: message.role,
+  content: message.content,
+}));
+
+// worker/src/ai/run-chat.ts
+env.AI.run(model, {
+  messages: aiMessages,   // typically alternating user / assistant; may include system merge cards
+  max_tokens: getChatMaxTokens(env),
+});
+```
+
+**Prompt characteristics:**
+
+- **No system message** and no branch-purpose injection yet (reserved for future `context_summary` work).
+- Messages are whatever is stored in D1 for that branch (`user`, `assistant`, and `system` merge cards with teaser text).
+- The model sees the raw conversation only; there is no hidden instruction layer.
+
+**To change chat behavior:** add a system prompt or branch-scoped preamble in `chat-service.ts` before calling `runChatModel()`, or enrich messages in `run-chat.ts`.
+
+### 2. Merge packet generation
+
+**Call chain:** `routes/merges.ts` → `merge-service.generateBranchMerge()` → `runMergePacketModel()`
+
+**System message** (fixed string in [`run-merge-packet.ts`](../worker/src/ai/run-merge-packet.ts)):
+
+```text
+You extract structured merge knowledge from branch conversations. Output JSON only. executiveSummary must read like a brief project update in chat, never meta commentary about packets or summaries.
+```
+
+**User prompt** — assembled by `buildMergePrompt()` in the same file. Structure:
+
+1. **Instructions** — parent must continue without reading the child conversation; do not invent decisions; prefer concrete details; emphasize new/changed info since prior merges.
+2. **JSON schema** — `MERGE_PACKET_SCHEMA` constant in `run-merge-packet.ts` (includes `executiveSummary`, section arrays, `rememberBullets`, optional `parentContinuityNote`).
+3. **Injected context** (from `merge-context.ts` via `merge-service`):
+   - Project name and summary
+   - Parent branch title, purpose, last 8 messages
+   - Child branch title, purpose, merge sequence
+   - Prior confirmed merge summaries (executive summary + decision titles)
+   - Child conversation (last 40 messages, char budget ~12k; may truncate)
+4. **Output rules** — array limits, `executiveSummary` style, `rememberBullets` style.
+
+**Key output fields and where they appear in the UI:**
+
+| LLM field | Used for |
+|-----------|----------|
+| `executiveSummary` | Parent chat merge card teaser (`messages.content` via [`renderMergeCardContent()`](../shared/render-merge-packet.ts)); also shown in Review Merge document |
+| `rememberBullets` | Confirm dialog bullet list (fallback: derived from decisions/deferrals in [`getRememberBullets()`](../shared/merge-display.ts)) |
+| Section arrays (`decisions`, `deferredWork`, etc.) | Review Merge document only (read-only by default) |
+| Full packet JSON | Stored in `branch_merges.packet_json`; full markdown also in `rendered_markdown` on confirm |
+
+**`executiveSummary` prompt rules** (in `buildMergePrompt()`):
+
+- 1–2 short sentences the parent branch will see in chat.
+- Write as project progress (example: *"We finalized the MVP splash page structure and deferred advanced marketing features."*).
+- Use first-person plural (we/our) when natural.
+- Do **not** mention merge packets, summaries, handoffs, or information transfer.
+
+**To change merge behavior:** edit `MERGE_PACKET_SCHEMA`, `buildMergePrompt()`, and/or the system message in [`worker/src/ai/run-merge-packet.ts`](../worker/src/ai/run-merge-packet.ts). Adjust context windows in [`worker/src/services/merge-context.ts`](../worker/src/services/merge-context.ts).
+
+### Planned LLM call sites (not implemented)
+
+| Feature | Status |
+|---------|--------|
+| Closure packet on branch close (`closure_summary`) | Column exists; no Workers AI call |
+| Branch context injection (`context_summary`) | Column exists; chat has no system prompt yet |
+| Auto-reply in parent after merge confirm | Explicitly out of scope |
 
 ---
 
@@ -610,7 +721,8 @@ The local chat app has been tested successfully with the `-fast` model.
 | `.dev.vars.example` | Yes | Template; copy to `.dev.vars` if you want a personal override |
 | `.env.example` | Yes | Reference only — not loaded by Vite or Wrangler at runtime |
 | `worker/src/types/env.ts` → `DEFAULT_AI_MODEL` | Yes | **Code fallback** if `CLOUDFLARE_AI_MODEL` is unset at runtime |
-| `worker/src/ai/run-chat.ts` | Yes | Reads `env.CLOUDFLARE_AI_MODEL \|\| DEFAULT_AI_MODEL` and passes it to `env.AI.run` |
+| `worker/src/ai/run-chat.ts` | Yes | Reads `env.CLOUDFLARE_AI_MODEL \|\| DEFAULT_AI_MODEL` and passes it to `env.AI.run` (chat) |
+| `worker/src/ai/run-merge-packet.ts` | Yes | Same model env var; separate `max_tokens` via `getMergeMaxTokens()` |
 
 The chat UI does **not** display the active model name. To see what is configured, check the files above.
 
@@ -707,9 +819,16 @@ POST /api/chat
       → getBranchById (reject if status !== 'active')
       → insert user message → D1
       → load branch history → D1
-      → runChatModel → Workers AI
+      → runChatModel → Workers AI (see LLM prompts)
       → insert assistant message → D1
   → JSON { reply, userMessage, assistantMessage }
+
+POST /api/branches/:childBranchId/merges/generate
+  → merge-service.generateBranchMerge
+      → buildMergeContextStrings (merge-context.ts)
+      → runMergePacketModel → Workers AI (see LLM prompts)
+      → createDraftMerge → D1
+  → JSON { merge, warnings }
 ```
 
 ---
@@ -755,8 +874,8 @@ Defined in `migrations/0001_initial.sql` and `migrations/0002_branch_merges.sql`
 | `merge_sequence` | 1-based counter per child branch |
 | `status` | `draft`, `confirmed`, or `discarded` |
 | `packet_json` | Structured `MergePacket` (user-editable while draft) |
-| `rendered_markdown` | Markdown inserted into parent on confirm |
-| `parent_message_id` | Parent `messages` row created on confirm |
+| `rendered_markdown` | Full packet markdown on confirm (audit/history; not shown inline in parent chat) |
+| `parent_message_id` | Parent `messages` row created on confirm (`content` = `executiveSummary` teaser only) |
 | `close_child_after` | Whether confirm also closed the child |
 
 One active draft per child enforced by partial unique index (`status = 'draft'`).
@@ -1182,4 +1301,4 @@ See [Intentionally out of scope](#intentionally-out-of-scope) for deferred items
 
 ---
 
-*Last updated: branch merges on `feature/branch-merges`.*
+*Last updated: hybrid merge UX and LLM prompt reference on `feature/branch-merges`.*

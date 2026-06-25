@@ -1,5 +1,6 @@
-import { renderMergePacketMarkdown } from "../../../shared/render-merge-packet";
+import { renderMergeCardContent, renderMergePacketMarkdown } from "../../../shared/render-merge-packet";
 import type {
+  BranchMergeRecord,
   ConfirmMergeResponse,
   GenerateMergeResponse,
   ListMergesResponse,
@@ -122,6 +123,23 @@ export async function listBranchMerges(
   const draft = await findDraftMergeByChild(env.DB, childBranchId);
 
   return { merges, draft };
+}
+
+export async function getBranchMerge(
+  env: WorkerEnv,
+  mergeId: string,
+  projectId: string,
+): Promise<BranchMergeRecord> {
+  const merge = await getBranchMergeById(env.DB, mergeId);
+  if (!merge || merge.projectId !== projectId) {
+    throw new Error("Merge not found for this project.");
+  }
+
+  if (merge.status === "discarded") {
+    throw new Error("Merge not found for this project.");
+  }
+
+  return merge;
 }
 
 export async function generateBranchMerge(
@@ -288,11 +306,12 @@ export async function confirmBranchMergeDraft(
   }
 
   const renderedMarkdown = renderMergePacketMarkdown(merge.packet);
+  const cardContent = renderMergeCardContent(merge.packet);
   const parentMessage = await insertMessage(env.DB, {
     projectId,
     branchId: parent.id,
     role: "system",
-    content: renderedMarkdown,
+    content: cardContent,
     messageKind: "merge_packet",
     mergeId: merge.id,
   });

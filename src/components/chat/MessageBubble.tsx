@@ -1,24 +1,43 @@
 import type { ChatMessage } from "../../types/message";
+import { MergeChatCard } from "../merges/MergeChatCard";
 
 type MessageBubbleProps = {
   message: ChatMessage;
+  projectId: string;
   highlighted?: boolean;
 };
 
-export function MessageBubble({ message, highlighted = false }: MessageBubbleProps) {
+export function MessageBubble({
+  message,
+  projectId,
+  highlighted = false,
+}: MessageBubbleProps) {
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
   const isMergePacket = message.messageKind === "merge_packet";
 
+  if (isMergePacket && message.mergeId) {
+    return (
+      <MergeChatCard
+        projectId={projectId}
+        mergeId={message.mergeId}
+        teaser={message.content}
+        highlighted={highlighted}
+        messageId={message.id}
+      />
+    );
+  }
+
   if (isMergePacket) {
     return (
       <article
-        className={`message-bubble message-bubble-merge ${highlighted ? "message-bubble-highlighted" : ""}`}
-        aria-label="Merge packet"
+        className={`merge-chat-card ${highlighted ? "message-bubble-highlighted" : ""}`}
+        aria-label="Merged branch"
         data-message-id={message.id}
       >
-        <header className="message-bubble-header">Merge packet</header>
-        <pre className="message-bubble-merge-content">{message.content}</pre>
+        <div className="merge-chat-card-body">
+          <p className="merge-chat-card-teaser">{message.content}</p>
+        </div>
       </article>
     );
   }

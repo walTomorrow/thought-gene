@@ -123,5 +123,9 @@ export function normalizeMergePacket(
       ? withIds(packet.rejectedOptions)
       : undefined,
     parentContinuityNote: packet.parentContinuityNote?.trim() || undefined,
+    rememberBullets: (packet.rememberBullets ?? [])
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, 5),
   };
 }

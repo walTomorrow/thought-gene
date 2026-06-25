@@ -113,7 +113,7 @@ export function BranchDetailsPanel({
               disabled={disabled || isGeneratingMerge}
               onClick={() => void onMerge()}
             >
-              {isGeneratingMerge ? "Generating packet…" : "Merge to parent"}
+              {isGeneratingMerge ? "Preparing merge…" : "Merge to parent"}
             </button>
             {hasDraft && (
               <button
@@ -122,7 +122,7 @@ export function BranchDetailsPanel({
                 disabled={disabled || isGeneratingMerge}
                 onClick={onResumeMergeDraft}
               >
-                Resume merge draft
+                Resume merge
               </button>
             )}
           </>

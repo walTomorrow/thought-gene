@@ -36,6 +36,8 @@ export type MergePacket = {
   nextSteps: MergeItem[];
   rejectedOptions?: MergeItem[];
   parentContinuityNote?: string;
+  /** Short bullets for the merge confirm dialog (3–5 items). */
+  rememberBullets?: string[];
 };
 
 export type BranchMergeStatus = "draft" | "confirmed" | "discarded";
@@ -99,6 +101,10 @@ export type ConfirmMergeResponse = {
 export type ListMergesResponse = {
   merges: BranchMergeSummary[];
   draft: BranchMergeRecord | null;
+};
+
+export type GetMergeResponse = {
+  merge: BranchMergeRecord;
 };
 
 export function newMergeItemId(): string {

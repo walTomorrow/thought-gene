@@ -31,7 +31,7 @@ const MERGE_PACKET_SCHEMA = `{
     "mergeSequence": number,
     "priorMergeIds": ["optional string ids"]
   },
-  "executiveSummary": "string",
+  "executiveSummary": "1-2 conversational sentences for the parent chat (see instructions)",
   "decisions": [{ "id": "uuid", "title": "string", "body": "string", "confidence": "high|medium|low", "sourceHint": "optional" }],
   "implementationDetails": [],
   "assumptions": [],
@@ -40,7 +40,8 @@ const MERGE_PACKET_SCHEMA = `{
   "risks": [],
   "nextSteps": [],
   "rejectedOptions": [],
-  "parentContinuityNote": "optional string"
+  "parentContinuityNote": "optional string",
+  "rememberBullets": ["3-5 short strings for the confirm dialog"]
 }`;
 
 function buildMergePrompt(context: MergeContextInput): string {
@@ -75,6 +76,8 @@ function buildMergePrompt(context: MergeContextInput): string {
     context.childMessages,
     "",
     "Limit each array to at most 8 items. Merge related points.",
+    "executiveSummary: 1–2 short sentences the parent branch will see in chat. Write as project progress (e.g. \"We finalized the MVP splash page structure and deferred advanced marketing features.\"). Use first-person plural (we/our) when natural. Do NOT mention merge packets, summaries, handoffs, or that information is being transferred.",
+    "Include rememberBullets: 3–5 short, user-facing phrases describing what the parent branch should remember (decisions, deferrals, open items). Do not mention merge packets.",
   ].join("\n");
 }
 
@@ -113,7 +116,7 @@ export async function runMergePacketModel(
       {
         role: "system",
         content:
-          "You extract structured merge packets from branch conversations. Output JSON only.",
+          "You extract structured merge knowledge from branch conversations. Output JSON only. executiveSummary must read like a brief project update in chat, never meta commentary about packets or summaries.",
       },
       { role: "user", content: prompt },
     ],
