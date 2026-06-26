@@ -1264,6 +1264,29 @@ textarea:disabled {
   font-weight: 600;
 }
 
+.project-card-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.project-featured-badge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid #e0e7ff;
+  background: #f5f3ff;
+  color: #6366f1;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
 .project-card-desc {
   margin: 0.35rem 0 0;
   font-size: 0.82rem;
@@ -1472,6 +1495,13 @@ textarea:disabled {
 .project-list-row-title {
   font-weight: 600;
   font-size: 0.92rem;
+}
+
+.project-list-row-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
 }
 
 .project-list-row-desc {

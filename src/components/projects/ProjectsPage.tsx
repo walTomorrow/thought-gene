@@ -39,9 +39,7 @@ export function ProjectsPage({ onOpenProject }: ProjectsPageProps) {
     null,
   );
 
-  const otherProjects = continueProject
-    ? projects.filter((project) => project.id !== continueProject.id)
-    : projects;
+  const featuredProjectId = continueProject?.id ?? null;
 
   function handleViewChange(mode: ProjectsViewMode) {
     setViewMode(mode);
@@ -171,7 +169,7 @@ export function ProjectsPage({ onOpenProject }: ProjectsPageProps) {
         </section>
       )}
 
-      {!isLoading && otherProjects.length > 0 && (
+      {!isLoading && projects.length > 0 && (
         <section className="projects-all">
           <div className="projects-all-header">
             <h2 className="projects-section-label">All Projects</h2>
@@ -180,11 +178,12 @@ export function ProjectsPage({ onOpenProject }: ProjectsPageProps) {
 
           {viewMode === "cards" ? (
             <div className="projects-grid">
-              {otherProjects.map((project) => (
+              {projects.map((project) => (
                 <ProjectCard
                   key={project.id}
                   project={project}
                   disabled={isDeleting}
+                  featured={project.id === featuredProjectId}
                   menuOpen={openMenuProjectId === project.id}
                   onMenuOpenChange={(open) =>
                     setOpenMenuProjectId(open ? project.id : null)
@@ -196,11 +195,12 @@ export function ProjectsPage({ onOpenProject }: ProjectsPageProps) {
             </div>
           ) : (
             <div className="projects-list">
-              {otherProjects.map((project) => (
+              {projects.map((project) => (
                 <ProjectListRow
                   key={project.id}
                   project={project}
                   disabled={isDeleting}
+                  featured={project.id === featuredProjectId}
                   menuOpen={openMenuProjectId === project.id}
                   onMenuOpenChange={(open) =>
                     setOpenMenuProjectId(open ? project.id : null)

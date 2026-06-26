@@ -394,6 +394,13 @@ When at least one project exists, the header shows **New Project** on the right 
 
 Populated layout uses a wider content column (`72rem`, matching the workspace) and a more prominent **Continue Working** hero card (larger type, gradient panel, stronger shadow). The empty-state layout stays narrower and centered.
 
+### Continue Working vs All Projects
+
+- **Continue Working** highlights the most recently opened project (from `localStorage` last-project id, or the first project if none stored). It is a featured hero card, not a separate project pool.
+- **All Projects** lists **every** project — including the featured one. No project is omitted from the list.
+- The featured project shows a subtle **Recently opened** badge in Cards and List views so users can connect the hero card to its row/card below.
+- Mental model: *Continue Working* = where to jump back in; *All Projects* = complete inventory.
+
 ### Project deletion behavior
 
 `DELETE /api/projects/:projectId` cascades in one batch (local order):

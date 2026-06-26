@@ -1,6 +1,7 @@
 import type { ProjectListItem } from "../../../shared/projects";
 import { formatRelativeTime, truncateText } from "../../lib/format-relative-time";
 import { ProjectActionsMenu } from "./ProjectActionsMenu";
+import { ProjectFeaturedBadge } from "./ProjectFeaturedBadge";
 import { ProjectMemoryBadges } from "./ProjectMemoryBadges";
 
 type ProjectCardProps = {
@@ -10,6 +11,7 @@ type ProjectCardProps = {
   onOpen: () => void;
   onDelete: () => void | Promise<void>;
   disabled?: boolean;
+  featured?: boolean;
 };
 
 export function ProjectCard({
@@ -19,6 +21,7 @@ export function ProjectCard({
   onOpen,
   onDelete,
   disabled = false,
+  featured = false,
 }: ProjectCardProps) {
   return (
     <article className="project-card">
@@ -28,7 +31,10 @@ export function ProjectCard({
         disabled={disabled}
         onClick={onOpen}
       >
-        <h3 className="project-card-title">{project.name}</h3>
+        <div className="project-card-title-row">
+          <h3 className="project-card-title">{project.name}</h3>
+          {featured && <ProjectFeaturedBadge />}
+        </div>
         <p className="project-card-desc">
           {project.summary?.trim() ||
             "No description yet — open to start thinking."}

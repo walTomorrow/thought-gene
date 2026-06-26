@@ -1,6 +1,7 @@
 import type { ProjectListItem } from "../../../shared/projects";
 import { formatRelativeTime, truncateText } from "../../lib/format-relative-time";
 import { ProjectActionsMenu } from "./ProjectActionsMenu";
+import { ProjectFeaturedBadge } from "./ProjectFeaturedBadge";
 import { ProjectMemoryBadges } from "./ProjectMemoryBadges";
 
 type ProjectListRowProps = {
@@ -10,6 +11,7 @@ type ProjectListRowProps = {
   onOpen: () => void;
   onDelete: () => void | Promise<void>;
   disabled?: boolean;
+  featured?: boolean;
 };
 
 export function ProjectListRow({
@@ -19,6 +21,7 @@ export function ProjectListRow({
   onOpen,
   onDelete,
   disabled = false,
+  featured = false,
 }: ProjectListRowProps) {
   return (
     <div className="project-list-row">
@@ -32,7 +35,10 @@ export function ProjectListRow({
           ◈
         </span>
         <span className="project-list-row-content">
-          <span className="project-list-row-title">{project.name}</span>
+          <span className="project-list-row-title-row">
+            <span className="project-list-row-title">{project.name}</span>
+            {featured && <ProjectFeaturedBadge />}
+          </span>
           <span className="project-list-row-desc">
             {truncateText(
               project.summary?.trim() || "No description yet.",
