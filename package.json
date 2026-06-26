@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "db:migrate:local": "wrangler d1 migrations apply thought-gene-db --local",
-    "db:migrate:remote": "wrangler d1 migrations apply thought-gene-db --remote"
+    "db:migrate:remote": "wrangler d1 migrations apply thought-gene-db --remote",
+    "db:reset:local": "wrangler d1 execute thought-gene-db --local --command \"DELETE FROM artifacts; UPDATE branch_merges SET parent_message_id = NULL; UPDATE messages SET merge_id = NULL; DELETE FROM branch_merges; DELETE FROM messages; UPDATE branches SET parent_branch_id = NULL; DELETE FROM branches; DELETE FROM projects;\""
   },
   "dependencies": {
     "hono": "^4.7.4",

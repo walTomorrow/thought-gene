@@ -14,6 +14,10 @@ import {
 import type { CreateBranchRequest, WorkspaceResponse } from "../types/message";
 import { isRootBranch } from "../types/message";
 
+type UseWorkspaceOptions = {
+  projectId: string;
+};
+
 type UseWorkspaceResult = {
   workspace: WorkspaceResponse | null;
   isLoading: boolean;
@@ -31,9 +35,11 @@ type UseWorkspaceResult = {
 };
 
 /**
- * Loads workspace on mount and manages branch selection, creation, and lifecycle.
+ * Loads workspace for a specific project and manages branch selection.
  */
-export function useWorkspace(): UseWorkspaceResult {
+export function useWorkspace({
+  projectId,
+}: UseWorkspaceOptions): UseWorkspaceResult {
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSwitching, setIsSwitching] = useState(false);
@@ -41,18 +47,21 @@ export function useWorkspace(): UseWorkspaceResult {
   const [isUpdating, setIsUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loadWorkspace = useCallback(async (branchId?: string) => {
-    const data = await fetchWorkspace(branchId);
+  const loadWorkspace = useCallback(
+    async (branchId?: string) => {
+      const data = await fetchWorkspace(projectId, branchId);
 
-    if (branchId && data.branch.id !== branchId) {
-      clearStoredBranchId();
-    } else {
-      writeStoredBranchId(data.branch.id);
-    }
+      if (branchId && data.branch.id !== branchId) {
+        clearStoredBranchId();
+      } else {
+        writeStoredBranchId(data.branch.id);
+      }
 
-    setWorkspace(data);
-    return data;
-  }, []);
+      setWorkspace(data);
+      return data;
+    },
+    [projectId],
+  );
 
   const reload = useCallback(async () => {
     setIsLoading(true);
