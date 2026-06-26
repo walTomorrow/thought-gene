@@ -8,26 +8,33 @@ This document is the canonical engineering guide for Thought Gene. It explains w
 
 ### Current branch
 
-`feature/branch-merges`
+`feature/artifact-registry`
 
 ### Current milestone
 
-**Branch merges** — generate, review, and confirm parent-facing merge packets from child branches.
+**Artifact registry** — structured project memory (backend foundation implemented; UI and LLM extraction deferred).
 
-**Status:** Implemented. Users can merge an active child branch into its parent: the assistant generates a structured packet, the user confirms via a lightweight dialog (optional document review/edit), confirm inserts a compact merge card in the parent chat, optionally closes the child, and the UI switches to the parent with the new message highlighted.
+**Previous milestone (complete):** Branch merges — generate, review, and confirm parent-facing merge packets from child branches.
 
 ### Current goals
 
-- Generate structured merge packets from child branch context (Workers AI)
-- Lightweight confirm dialog with **remember bullets**; full document review is optional
-- Conversational **executive summary** for parent chat teasers (no meta “merge packet” language)
-- Insert compact merge cards into the parent branch (`message_kind=merge_packet`)
-- Track merge history per child branch (`branch_merges` table)
-- One draft per child; replace or resume existing draft
-- Block root merges and merges into closed parents
-- Optionally close child after merge
+- Artifact registry UI and LLM extraction from merge packets (deferred on this branch)
+- Global project memory views
+- Chat context injection from accepted artifacts
 
-### Completed work
+### Completed work (artifact registry backend)
+
+- Migration `0003_artifacts.sql` — `artifacts` table
+- `shared/artifact.ts` — types, statuses, metadata items (`{ id, title, body }`)
+- `worker/src/db/artifacts.ts`, `artifact-service.ts`, `routes/artifacts.ts`
+- Manual CRUD API: project-level and branch-level listing, create, update, resolve, drop
+- Provenance fields: `sourceBranchId`, `sourceMergeId`, `sourceMessageId`
+
+### Completed work (branch merges)
+
+Branch merges are **implemented**. Users can merge an active child branch into its parent: the assistant generates a structured packet, the user confirms via a lightweight dialog (optional document review/edit), confirm inserts a compact merge card in the parent chat, optionally closes the child, and the UI switches to the parent with the new message highlighted.
+
+### Completed work (prior milestones)
 
 - All `feature/branch-management` work (branch lifecycle)
 - Migration `0002_branch_merges.sql` — `branch_merges` table; `messages.message_kind`, `messages.merge_id`
@@ -39,7 +46,8 @@ This document is the canonical engineering guide for Thought Gene. It explains w
 
 ### Remaining work (future branches)
 
-- Artifact promotion from merge/closure packets to project memory
+- LLM artifact extraction from merge packets (mapping below; `nextSteps[]` / task artifacts out of scope)
+- Artifact UI, chat highlighting, search/RAG
 - Create branch from specific message (`source_message_id`)
 - Branch context injection (`context_summary`, parent message seeding)
 - LLM-generated closure packets on branch close (`closure_summary`)
@@ -87,6 +95,7 @@ The following are **not** part of `feature/branch-management` and were explicitl
 │  POST /api/branches · PATCH /api/branches/:id                │
 │  POST /api/branches/:id/close · POST /api/branches/:id/reopen│
 │  GET/POST/PATCH/DELETE /api/branches/:id/merges/...          │
+│  GET/POST/PATCH /api/artifacts/...                           │
 │  POST /api/chat (rejects non-active branches → 400)          │
 │  routes/ → services/ → db/ → D1                              │
 │  routes/ → services/ → ai/run-chat.ts → Workers AI           │
@@ -341,9 +350,16 @@ This milestone only started **using** those columns; it did not change the schem
 | `PATCH` | `/api/branches/:childBranchId/merges/:mergeId` | Update draft packet JSON |
 | `POST` | `/api/branches/:childBranchId/merges/:mergeId/confirm` | Insert parent merge message |
 | `DELETE` | `/api/branches/:childBranchId/merges/:mergeId?projectId=` | Discard draft |
+| `GET` | `/api/artifacts?projectId=&sourceBranchId=&type=&status=` | List project artifacts (optional filters) |
+| `GET` | `/api/artifacts/:artifactId?projectId=` | Get single artifact |
+| `GET` | `/api/branches/:branchId/artifacts?projectId=&type=&status=` | List artifacts by source branch |
+| `POST` | `/api/artifacts` | Create artifact (manual; default `status: suggested`, may set `accepted`) |
+| `PATCH` | `/api/artifacts/:artifactId` | Update artifact fields / status / metadata |
+| `POST` | `/api/artifacts/:artifactId/resolve` | Set `status = resolved` (idempotent no-op if already resolved) |
+| `POST` | `/api/artifacts/:artifactId/drop` | Set `status = dropped` (idempotent no-op if already dropped) |
 | `POST` | `/api/chat` | Send one user turn (active branches only) |
 
-Types live in `shared/workspace.ts`, `shared/chat.ts`, and `shared/merge.ts`. See [docs/branch-merges.md](branch-merges.md).
+Types live in `shared/workspace.ts`, `shared/chat.ts`, `shared/merge.ts`, and `shared/artifact.ts`. See [docs/branch-merges.md](branch-merges.md).
 
 ### `GET /api/workspace`
 
@@ -490,6 +506,53 @@ type ChatResponse = {
 | Branch `status !== 'active'` | 400 | *"Cannot send messages to a closed branch."* |
 | Invalid body | 400 | Validation message from `parseChatRequest` |
 
+### Artifacts
+
+Manual project memory records. No LLM extraction, UI, or chat injection in this milestone.
+
+**Top-level types:** `decision`, `requirement`, `open_question`, `deferred_work`, `future_goal`
+
+**Statuses:** `suggested`, `accepted`, `resolved`, `deferred`, `superseded`, `dropped`
+
+**Supporting metadata** (not top-level types): `assumptions`, `risks`, `constraints`, `rejectedOptions` — each an array of `{ id, title, body }` mirroring merge `MergeItem` shape.
+
+**Create request** (`POST /api/artifacts`):
+
+```ts
+type CreateArtifactRequest = {
+  projectId: string;
+  type: ArtifactType;
+  title: string;
+  body?: string;
+  reasoning?: string;
+  assumptions?: ArtifactMetadataItem[];
+  risks?: ArtifactMetadataItem[];
+  constraints?: ArtifactMetadataItem[];
+  rejectedOptions?: ArtifactMetadataItem[];
+  status?: ArtifactStatus; // default: suggested; manual create may use accepted
+  sourceBranchId?: string;
+  sourceMergeId?: string;
+  sourceMessageId?: string;
+};
+```
+
+**List filters:** `projectId` (required), optional `sourceBranchId`, `type`, `status`. Branch route filters by `source_branch_id = branchId`.
+
+**Resolve / drop:** `POST` with `{ projectId, reasoning? }`. Idempotent — returns existing artifact unchanged if already `resolved` or `dropped`.
+
+**Future merge extraction mapping** (not implemented):
+
+| Merge packet section | → Artifact `type` | Notes |
+|---------------------|-------------------|-------|
+| `decisions[]` | `decision` | Metadata from packet-level assumptions/risks/rejectedOptions as appropriate |
+| `implementationDetails[]` | `requirement` | |
+| `openQuestions[]` | `open_question` | |
+| `deferredWork[]` | `deferred_work` | |
+| `nextSteps[]` | — | **Out of scope** — tasks/actions, not `future_goal` |
+| Packet `assumptions[]`, `risks[]`, `rejectedOptions[]` | — | Copied into artifact metadata fields |
+
+`future_goal` is for broader strategic direction; not auto-mapped from merge packets in v1 extraction.
+
 ### Why the client no longer sends `messages[]`
 
 The previous API accepted full client history. With D1 persistence, the server loads history from the database to avoid drift, duplicate IDs, and tampering. The client receives server-generated message IDs after each turn.
@@ -586,7 +649,7 @@ Shared definitions: `shared/workspace.ts`, `shared/chat.ts`.
 
 **Problem it solves:** Structured routing without Express-style weight.
 
-**Interaction:** `worker/src/app.ts` mounts `/api/workspace`, `/api/branches`, `/api/chat`, and merge routes under `/api/merges` and `/api/branches/:id/merges`.
+**Interaction:** `worker/src/app.ts` mounts `/api/workspace`, `/api/branches`, `/api/chat`, merge routes, and `/api/artifacts`.
 
 ### Workers AI
 
@@ -697,6 +760,8 @@ You extract structured merge knowledge from branch conversations. Output JSON on
 | Closure packet on branch close (`closure_summary`) | Column exists; no Workers AI call |
 | Branch context injection (`context_summary`) | Column exists; chat has no system prompt yet |
 | Auto-reply in parent after merge confirm | Explicitly out of scope |
+
+**Future:** A dev-only [AI diagnostics panel](#future-developer-tooling) is planned to surface model ID, prompt sources, token estimates, latency, and related metrics during local development.
 
 ---
 
@@ -829,6 +894,10 @@ POST /api/branches/:childBranchId/merges/generate
       → runMergePacketModel → Workers AI (see LLM prompts)
       → createDraftMerge → D1
   → JSON { merge, warnings }
+
+GET /api/artifacts | POST /api/artifacts | PATCH /api/artifacts/:id | resolve | drop
+  → artifact-service → db/artifacts → D1
+  → JSON { artifacts } | { artifact }
 ```
 
 ---
@@ -837,7 +906,7 @@ POST /api/branches/:childBranchId/merges/generate
 
 ### Schema
 
-Defined in `migrations/0001_initial.sql` and `migrations/0002_branch_merges.sql`:
+Defined in `migrations/0001_initial.sql`, `migrations/0002_branch_merges.sql`, and `migrations/0003_artifacts.sql`:
 
 | Table | Purpose |
 |-------|---------|
@@ -845,6 +914,7 @@ Defined in `migrations/0001_initial.sql` and `migrations/0002_branch_merges.sql`
 | `branches` | Conversational workspaces; root branch has `parent_branch_id IS NULL` |
 | `messages` | Chat and merge packet messages scoped to a branch |
 | `branch_merges` | Merge draft/confirm lifecycle and packet JSON |
+| `artifacts` | Project memory records (manual CRUD; future LLM extraction target) |
 
 #### `branches` column usage (this milestone)
 
@@ -879,6 +949,19 @@ Defined in `migrations/0001_initial.sql` and `migrations/0002_branch_merges.sql`
 | `close_child_after` | Whether confirm also closed the child |
 
 One active draft per child enforced by partial unique index (`status = 'draft'`).
+
+#### `artifacts` column usage
+
+| Column | Role |
+|--------|------|
+| `type` | `decision` \| `requirement` \| `open_question` \| `deferred_work` \| `future_goal` |
+| `status` | `suggested` \| `accepted` \| `resolved` \| `deferred` \| `superseded` \| `dropped` |
+| `title`, `body`, `reasoning` | Core artifact content |
+| `assumptions_json`, `risks_json`, `constraints_json`, `rejected_options_json` | JSON arrays of `{ id, title, body }` metadata |
+| `source_branch_id`, `source_merge_id`, `source_message_id` | Optional provenance FKs |
+| `created_at`, `updated_at` | Timestamps; list ordered by `updated_at DESC` |
+
+No hard delete — terminal state is `dropped`.
 
 ### D1 setup (required before first `pnpm dev`)
 
@@ -1270,6 +1353,61 @@ Moving these into subfolders would fight tool defaults without a clear maintaina
 
 ---
 
+## Future Developer Tooling
+
+> **Status:** Not implemented. Documentation only — a planned dev-mode enhancement to make prompt engineering, debugging, and performance tuning easier. Not part of the current product surface.
+
+### Planned: AI diagnostics panel (dev only)
+
+A collapsible **diagnostics panel** visible during local development (e.g. gated by `import.meta.env.DEV` or an explicit `?diagnostics=1` flag). It would surface per-request and session-level metrics for every Workers AI call without requiring log spelunking.
+
+**Primary goals:**
+
+- Speed up **prompt iteration** — see exactly what was sent and where it was built
+- Speed up **debugging** — correlate UI actions with model input/output and latency
+- Speed up **performance tuning** — spot oversized contexts and slow calls early
+
+**Prompts remain first-class source code.** The panel should **read from** centralized prompt modules (see [LLM prompts](#llm-prompts-workers-ai)), not duplicate or inline prompt text in the UI. Prompts stay in dedicated files (`worker/src/ai/run-chat.ts`, `worker/src/ai/run-merge-packet.ts`, future `worker/src/ai/prompts/*`) so they can be iterated independently of routes, services, and React components.
+
+### Proposed metrics
+
+| Category | Metric | Notes |
+|----------|--------|-------|
+| **Model** | Current Workers AI model ID | Resolved value: `env.CLOUDFLARE_AI_MODEL \|\| DEFAULT_AI_MODEL` |
+| **Model** | `max_tokens` used | From [`ai-max-tokens.ts`](../worker/src/ai/ai-max-tokens.ts) per call type (chat vs merge) |
+| **Prompt** | Call type | `chat` \| `merge_packet` (extensible) |
+| **Prompt** | Source file(s) | e.g. `run-chat.ts`, `run-merge-packet.ts` (`buildMergePrompt`), `merge-context.ts` for injected context |
+| **Prompt** | System + user prompt character count | Per request; optional copy-to-clipboard |
+| **Prompt** | Estimated token count | Heuristic (chars ÷ 4) or tokenizer if added later; show input vs output separately |
+| **Context** | Conversation message count | Branch history length sent to chat |
+| **Context** | Merge context stats | Parent tail count, child message count, truncation flags from `merge-context.ts` |
+| **Context** | Estimated context window usage | Input tokens vs model context limit (when catalog metadata available) |
+| **Performance** | End-to-end response latency | Worker receive → `AI.run` → persist (ms) |
+| **Performance** | Workers AI inference time | If exposed in binding response or headers |
+| **Payload** | Request / response byte size | Serialized `messages` payload and raw model output |
+| **Cost / usage** | Estimated Neuron usage | If Workers AI returns usage metadata; otherwise document as unavailable |
+| **Cost / usage** | AI Gateway metrics (future) | Token counts, cost, provider routing, cache hits — when/if the project adopts [Vercel AI Gateway](https://vercel.com/docs/ai-gateway) or Cloudflare equivalent |
+| **Reliability** | Last error / empty response | Model deprecation (5028), parse failures, truncation warnings |
+| **Session** | Rolling averages | Mean latency and token estimates over the dev session |
+
+### Additional ideas
+
+- **Prompt diff view** — compare last two merge generations or chat turns side-by-side after prompt edits
+- **Export debug bundle** — JSON download of prompt, context, response, and timings for sharing in issues
+- **Live prompt preview** — render `buildMergePrompt()` output with current branch context before calling the model (merge dry-run)
+- **Warning badges** — child conversation truncated, no new messages since last merge, context near budget limit
+- **Link to prompt docs** — jump from panel row to the [LLM prompts](#llm-prompts-workers-ai) section and source file
+
+### Implementation sketch (future)
+
+1. Worker wraps `env.AI.run` in a thin telemetry helper that records timings and payload sizes.
+2. Chat and merge services attach metadata (call type, source files, context stats) to responses in dev only, e.g. `X-Thought-Gene-AI-Debug` header or a `_debug` field stripped in production.
+3. React dev panel subscribes to the latest turn via hook state or a dedicated `GET /api/dev/ai-traces` endpoint (dev-only route).
+
+This tooling is intentionally **out of scope** for the artifact registry milestone and for production builds.
+
+---
+
 ## Known Limitations
 
 | Limitation | Notes |
@@ -1290,7 +1428,7 @@ Moving these into subfolders would fight tool defaults without a clear maintaina
 
 ### Future improvements
 
-See [Intentionally out of scope](#intentionally-out-of-scope) for deferred items. Additional ideas:
+See [Intentionally out of scope](#intentionally-out-of-scope) for deferred product items. See [Future Developer Tooling](#future-developer-tooling) for planned dev-mode AI diagnostics. Additional ideas:
 - Create branch from message (`source_message_id`)
 - Branch context injection (`context_summary`, parent history seeding)
 - Multiple projects UI
@@ -1301,4 +1439,4 @@ See [Intentionally out of scope](#intentionally-out-of-scope) for deferred items
 
 ---
 
-*Last updated: hybrid merge UX and LLM prompt reference on `feature/branch-merges`.*
+*Last updated: artifact registry backend on `feature/artifact-registry`.*

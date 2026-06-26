@@ -44,6 +44,18 @@ export async function listMessagesByBranch(
   return (result.results ?? []).map(mapMessageRow);
 }
 
+export async function getMessageById(
+  db: D1Database,
+  messageId: string,
+): Promise<StoredMessage | null> {
+  const result = await db
+    .prepare(`${MESSAGE_SELECT} FROM messages WHERE id = ?`)
+    .bind(messageId)
+    .first<MessageRow>();
+
+  return result ? mapMessageRow(result) : null;
+}
+
 export async function insertMessage(
   db: D1Database,
   input: {
