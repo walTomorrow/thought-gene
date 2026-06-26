@@ -9,6 +9,7 @@ import { formatRelativeTime, truncateText } from "../../lib/format-relative-time
 import { markProjectOpened, useProjects } from "../../hooks/use-projects";
 import { clearStoredBranchId } from "../../lib/branch-storage";
 import { CreateProjectDialog } from "./CreateProjectDialog";
+import { ProjectActionsMenu } from "./ProjectActionsMenu";
 import { ProjectCard } from "./ProjectCard";
 import { ProjectListRow } from "./ProjectListRow";
 import { ProjectMemoryBadges } from "./ProjectMemoryBadges";
@@ -34,6 +35,9 @@ export function ProjectsPage({ onOpenProject }: ProjectsPageProps) {
 
   const [viewMode, setViewMode] = useState<ProjectsViewMode>(readProjectsViewMode);
   const [createOpen, setCreateOpen] = useState(false);
+  const [openMenuProjectId, setOpenMenuProjectId] = useState<string | null>(
+    null,
+  );
 
   const otherProjects = continueProject
     ? projects.filter((project) => project.id !== continueProject.id)
@@ -50,14 +54,9 @@ export function ProjectsPage({ onOpenProject }: ProjectsPageProps) {
     onOpenProject(project.id);
   }
 
-  async function handleDelete(project: ProjectListItem) {
-    const confirmed = window.confirm(
-      `Delete "${project.name}"?\n\nThis permanently removes all branches, messages, merges, and artifacts in this project.`,
-    );
-    if (!confirmed) {
-      return;
-    }
-    await removeProject(project.id);
+  async function handleDelete(projectId: string) {
+    await removeProject(projectId);
+    setOpenMenuProjectId((current) => (current === projectId ? null : current));
   }
 
   async function handleCreate(input: { name: string; summary?: string }) {
@@ -128,30 +127,42 @@ export function ProjectsPage({ onOpenProject }: ProjectsPageProps) {
       {!isLoading && continueProject && (
         <section className="projects-continue">
           <h2 className="projects-section-label">Continue Working</h2>
-          <button
-            type="button"
-            className="projects-continue-card"
-            disabled={isDeleting}
-            onClick={() => void handleOpen(continueProject)}
-          >
-            <h3 className="projects-continue-title">{continueProject.name}</h3>
-            <p className="projects-continue-desc">
-              {continueProject.summary?.trim() ||
-                "Pick up where you left off."}
-            </p>
-            <p className="projects-continue-meta">
-              Updated {formatRelativeTime(continueProject.updatedAt)}
-              {continueProject.lastActivity && (
-                <>
-                  <span className="project-dot" aria-hidden="true">
-                    ·
-                  </span>
-                  {truncateText(continueProject.lastActivity, 72)}
-                </>
-              )}
-            </p>
-            <ProjectMemoryBadges memory={continueProject.memory} inline />
-          </button>
+          <div className="projects-continue-shell">
+            <button
+              type="button"
+              className="projects-continue-card"
+              disabled={isDeleting}
+              onClick={() => void handleOpen(continueProject)}
+            >
+              <h3 className="projects-continue-title">{continueProject.name}</h3>
+              <p className="projects-continue-desc">
+                {continueProject.summary?.trim() ||
+                  "Pick up where you left off."}
+              </p>
+              <p className="projects-continue-meta">
+                Updated {formatRelativeTime(continueProject.updatedAt)}
+                {continueProject.lastActivity && (
+                  <>
+                    <span className="project-dot" aria-hidden="true">
+                      ·
+                    </span>
+                    {truncateText(continueProject.lastActivity, 72)}
+                  </>
+                )}
+              </p>
+              <ProjectMemoryBadges memory={continueProject.memory} inline />
+            </button>
+            <ProjectActionsMenu
+              project={continueProject}
+              open={openMenuProjectId === continueProject.id}
+              onOpenChange={(open) =>
+                setOpenMenuProjectId(open ? continueProject.id : null)
+              }
+              onDelete={() => handleDelete(continueProject.id)}
+              disabled={isDeleting}
+              triggerClassName="project-card-menu"
+            />
+          </div>
         </section>
       )}
 
@@ -169,8 +180,12 @@ export function ProjectsPage({ onOpenProject }: ProjectsPageProps) {
                   key={project.id}
                   project={project}
                   disabled={isDeleting}
+                  menuOpen={openMenuProjectId === project.id}
+                  onMenuOpenChange={(open) =>
+                    setOpenMenuProjectId(open ? project.id : null)
+                  }
                   onOpen={() => void handleOpen(project)}
-                  onDelete={() => void handleDelete(project)}
+                  onDelete={() => handleDelete(project.id)}
                 />
               ))}
             </div>
@@ -181,8 +196,12 @@ export function ProjectsPage({ onOpenProject }: ProjectsPageProps) {
                   key={project.id}
                   project={project}
                   disabled={isDeleting}
+                  menuOpen={openMenuProjectId === project.id}
+                  onMenuOpenChange={(open) =>
+                    setOpenMenuProjectId(open ? project.id : null)
+                  }
                   onOpen={() => void handleOpen(project)}
-                  onDelete={() => void handleDelete(project)}
+                  onDelete={() => handleDelete(project.id)}
                 />
               ))}
             </div>

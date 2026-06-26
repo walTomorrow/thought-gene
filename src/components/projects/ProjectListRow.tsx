@@ -1,16 +1,21 @@
 import type { ProjectListItem } from "../../../shared/projects";
 import { formatRelativeTime, truncateText } from "../../lib/format-relative-time";
+import { ProjectActionsMenu } from "./ProjectActionsMenu";
 import { ProjectMemoryBadges } from "./ProjectMemoryBadges";
 
 type ProjectListRowProps = {
   project: ProjectListItem;
+  menuOpen: boolean;
+  onMenuOpenChange: (open: boolean) => void;
   onOpen: () => void;
-  onDelete: () => void;
+  onDelete: () => void | Promise<void>;
   disabled?: boolean;
 };
 
 export function ProjectListRow({
   project,
+  menuOpen,
+  onMenuOpenChange,
   onOpen,
   onDelete,
   disabled = false,
@@ -44,18 +49,14 @@ export function ProjectListRow({
         </span>
         <ProjectMemoryBadges memory={project.memory} inline />
       </button>
-      <button
-        type="button"
-        className="project-list-row-menu"
+      <ProjectActionsMenu
+        project={project}
+        open={menuOpen}
+        onOpenChange={onMenuOpenChange}
+        onDelete={onDelete}
         disabled={disabled}
-        aria-label={`Delete ${project.name}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          onDelete();
-        }}
-      >
-        ⋯
-      </button>
+        triggerClassName="project-list-row-menu"
+      />
     </div>
   );
 }

@@ -392,7 +392,22 @@ No automatic **Default Project** is created. An empty database shows the Project
 4. `branches` (`parent_branch_id` nulled first for self-references)
 5. `projects`
 
-There is no soft delete. The client confirms before calling delete.
+There is no soft delete. The client uses an inline overflow-menu confirmation (see below).
+
+### Project deletion UX
+
+Deletion is intentionally **not** a modal or page overlay.
+
+- Each project card and list row exposes a **⋮** overflow menu in the upper-right.
+- **Rename** appears as a disabled placeholder (not implemented yet).
+- **Delete Project** expands the same popover into a lightweight inline confirmation panel.
+- No backdrop dimming; the page stays in place.
+- To confirm, the user must type exactly `delete <project name>` (e.g. `delete Thought Gene`).
+- **Delete** stays disabled until the phrase matches; **Cancel** closes the popover immediately.
+- **Escape** closes the popover; focus is trapped inside the open popover; ARIA `menu` / `dialog` roles and labels are used.
+- Styled for a calm, developer-tool feel rather than a consumer confirmation dialog.
+
+Implementation: `src/components/projects/ProjectActionsMenu.tsx`, phrase helper in `src/lib/project-delete-confirmation.ts`.
 
 ### Cards / List toggle
 
