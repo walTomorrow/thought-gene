@@ -6,7 +6,7 @@ import {
   listClosedBranchesByProject,
 } from "../db/branches";
 import { listMessagesByBranch } from "../db/messages";
-import { getOrCreateDefaultProject } from "../db/projects";
+import { getProjectById, touchProjectUpdatedAt } from "../db/projects";
 import { getBranchForProject } from "./branch-service";
 
 function toBranchSummary(branch: {
@@ -30,13 +30,18 @@ function toBranchSummary(branch: {
 }
 
 /**
- * Loads the default workspace: project, branch lists, selected branch, and messages.
+ * Loads a project workspace: branch lists, selected branch, and messages.
  */
 export async function loadWorkspace(
   env: WorkerEnv,
+  projectId: string,
   branchId?: string,
 ): Promise<WorkspaceResponse> {
-  const project = await getOrCreateDefaultProject(env.DB);
+  const project = await getProjectById(env.DB, projectId);
+  if (!project) {
+    throw new Error("Project not found.");
+  }
+
   const rootBranch = await getOrCreateMainBranch(env.DB, project.id);
 
   let selectedBranch = rootBranch;
@@ -44,10 +49,10 @@ export async function loadWorkspace(
     const requested = await getBranchForProject(env, branchId, project.id);
     if (requested) {
       selectedBranch = requested;
-    } else if (branchId !== rootBranch.id) {
-      // Invalid id — fall back to root; client clears stale localStorage.
     }
   }
+
+  await touchProjectUpdatedAt(env.DB, project.id);
 
   const activeBranches = await listActiveBranchesByProject(env.DB, project.id);
   const closedBranches = await listClosedBranchesByProject(env.DB, project.id);
@@ -55,7 +60,10 @@ export async function loadWorkspace(
   const isReadOnly = selectedBranch.status === "closed";
 
   return {
-    project,
+    project: {
+      ...project,
+      updatedAt: new Date().toISOString(),
+    },
     branches: activeBranches.map(toBranchSummary),
     closedBranches: closedBranches.map(toBranchSummary),
     branch: selectedBranch,

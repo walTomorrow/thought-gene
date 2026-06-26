@@ -8,19 +8,27 @@ This document is the canonical engineering guide for Thought Gene. It explains w
 
 ### Current branch
 
-`feature/artifact-registry`
+`feature/projects`
 
 ### Current milestone
 
-**Artifact registry** — structured project memory (backend foundation implemented; UI and LLM extraction deferred).
+**Project management** — multi-project home screen, create/open/delete projects, workspace per project.
 
-**Previous milestone (complete):** Branch merges — generate, review, and confirm parent-facing merge packets from child branches.
+**Previous milestones (complete):** Artifact registry backend; branch merges; branch lifecycle.
 
 ### Current goals
 
-- Artifact registry UI and LLM extraction from merge packets (deferred on this branch)
-- Global project memory views
-- Chat context injection from accepted artifacts
+- Projects home page (Hybrid design) as app entry point
+- Real project CRUD with cascade delete
+- Hash-based routing: Projects → workspace
+
+### Completed work (project management)
+
+- Projects API: list, create (with root `Main` branch), open, delete
+- `GET /api/workspace?projectId=` — required `projectId`; no auto Default Project
+- Hybrid Projects page: Continue Working, All Projects, Cards/List toggle
+- Hash routes: `#/projects`, `#/project/:id`
+- `pnpm db:reset:local` for clearing **local** D1 data only
 
 ### Completed work (artifact registry backend)
 
@@ -51,7 +59,7 @@ Branch merges are **implemented**. Users can merge an active child branch into i
 - Create branch from specific message (`source_message_id`)
 - Branch context injection (`context_summary`, parent message seeding)
 - LLM-generated closure packets on branch close (`closure_summary`)
-- Multiple project UI
+- Multiple project picker beyond home page (settings, templates)
 - Markdown rendering for chat bubbles (merge document view uses structured sections today)
 - Authentication and deployment hardening
 
@@ -339,7 +347,11 @@ This milestone only started **using** those columns; it did not change the schem
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/api/workspace?branchId=` | Bootstrap project, branch lists, messages, `isReadOnly` |
+| `GET` | `/api/projects` | List projects with branch + memory stats |
+| `POST` | `/api/projects` | Create project + root `Main` branch |
+| `POST` | `/api/projects/:projectId/open` | Touch `updated_at` (last opened) |
+| `DELETE` | `/api/projects/:projectId` | Delete project and all related data |
+| `GET` | `/api/workspace?projectId=&branchId=` | Load project workspace (requires `projectId`) |
 | `POST` | `/api/branches` | Create active branch |
 | `PATCH` | `/api/branches/:branchId` | Update title and/or purpose |
 | `POST` | `/api/branches/:branchId/close` | Close non-root branch |
@@ -359,11 +371,91 @@ This milestone only started **using** those columns; it did not change the schem
 | `POST` | `/api/artifacts/:artifactId/drop` | Set `status = dropped` (idempotent no-op if already dropped) |
 | `POST` | `/api/chat` | Send one user turn (active branches only) |
 
-Types live in `shared/workspace.ts`, `shared/chat.ts`, `shared/merge.ts`, and `shared/artifact.ts`. See [docs/branch-merges.md](branch-merges.md).
+Types live in `shared/workspace.ts`, `shared/chat.ts`, `shared/merge.ts`, `shared/artifact.ts`, and `shared/projects.ts`. See [docs/branch-merges.md](branch-merges.md).
+
+### App startup flow
+
+1. App opens to **Projects page** (`#/projects`) — not a default workspace.
+2. User creates a project or opens an existing one → navigates to `#/project/:projectId`.
+3. `GET /api/workspace?projectId=` loads branches, selected branch, and messages.
+4. **← Projects** in the workspace header returns to the home screen.
+
+No automatic **Default Project** is created. An empty database shows the Projects empty state (see below).
+
+### Empty Projects page
+
+When there are no projects:
+
+- Header shows only the **Thought Gene** brand (no nav tab label).
+- **New Project** is hidden in the header to avoid duplicating the primary CTA.
+- A larger centered empty-state panel invites the user with **Create your first project** as the sole action.
+
+When at least one project exists, the header shows **New Project** on the right as usual.
+
+Populated layout uses a wider content column (`72rem`, matching the workspace) and a more prominent **Continue Working** hero card (larger type, gradient panel, stronger shadow). The empty-state layout stays narrower and centered.
+
+### Continue Working vs All Projects
+
+- **Continue Working** highlights the most recently opened project (from `localStorage` last-project id, or the first project if none stored). It is a featured hero card, not a separate project pool.
+- **All Projects** lists **every** project — including the featured one. No project is omitted from the list.
+- The featured project shows a subtle **Recently opened** badge in Cards and List views so users can connect the hero card to its row/card below.
+- Mental model: *Continue Working* = where to jump back in; *All Projects* = complete inventory.
+
+### Project deletion behavior
+
+`DELETE /api/projects/:projectId` cascades in one batch (local order):
+
+1. `artifacts`
+2. `branch_merges` (`parent_message_id` nulled first; `messages.merge_id` nulled)
+3. `messages`
+4. `branches` (`parent_branch_id` nulled first for self-references)
+5. `projects`
+
+There is no soft delete. The client uses an inline overflow-menu confirmation (see below).
+
+### Project deletion UX
+
+Deletion is intentionally **not** a modal or page overlay.
+
+- Each project card and list row exposes a **⋮** overflow menu in the upper-right.
+- **Rename** appears as a disabled placeholder (not implemented yet).
+- **Delete Project** expands the same popover into a lightweight inline confirmation panel.
+- No backdrop dimming; the page stays in place.
+- To confirm, the user must type exactly `delete <project name>` (e.g. `delete Thought Gene`).
+- **Delete** stays disabled until the phrase matches; **Cancel** closes the popover immediately.
+- **Escape** closes the popover; focus is trapped inside the open popover; ARIA `menu` / `dialog` roles and labels are used.
+- Styled for a calm, developer-tool feel rather than a consumer confirmation dialog.
+
+Implementation: `src/components/projects/ProjectActionsMenu.tsx`, phrase helper in `src/lib/project-delete-confirmation.ts`.
+
+### Cards / List toggle
+
+- **Default:** Cards (Hybrid design)
+- **Persistence:** `localStorage` key `thought-gene:projectsView`
+- **Inspired by** file-manager view switchers (segmented control); not a visual copy of Google Drive
+- List view shows the same data in compact rows with memory badges
+
+### Local dev data reset
+
+To clear **local D1 only** (never runs against remote):
+
+```powershell
+pnpm db:reset:local
+```
+
+This deletes all rows from `artifacts`, `branch_merges`, `messages`, `branches`, and `projects` (with FK-safe ordering). Schema and migrations are unchanged.
+
+**Nuclear option** (full local D1 wipe): delete the `.wrangler/state/v3/d1/` folder, then run `pnpm db:migrate:local`.
+
+**Do not** use `db:reset:local` against production. Remote cleanup requires explicit `wrangler d1 execute ... --remote` — not provided by this script.
+
+After reset, open the app → empty Projects page → create fresh projects.
 
 ### `GET /api/workspace`
 
-Optional query: `?branchId=<uuid>`
+Optional query: `?projectId=<uuid>&branchId=<uuid>`
+
+`projectId` is **required**. Returns 400 if missing; 404 if project not found.
 
 ```ts
 type WorkspaceResponse = {
@@ -387,9 +479,8 @@ type BranchSummary = {
 ```
 
 - Returns **active** branches in `branches` and **closed** branches in `closedBranches`.
-- If `branchId` is missing or unknown to the project → falls back to the **root branch** (`parent_branch_id IS NULL`).
+- If `branchId` is missing or unknown → falls back to the **root branch** (`parent_branch_id IS NULL`).
 - If `branchId` refers to a closed branch → loads it for read-only viewing (`isReadOnly: true`).
-- On first access, creates **Default Project** and root branch if needed (default title `"Main"`).
 - Root branch is identified structurally by `parentBranchId === null`, not by title. Use `isRootBranch()` from `shared/workspace.ts`.
 
 Full `BranchRecord` shape (selected branch and mutation responses):
@@ -557,12 +648,12 @@ type CreateArtifactRequest = {
 
 The previous API accepted full client history. With D1 persistence, the server loads history from the database to avoid drift, duplicate IDs, and tampering. The client receives server-generated message IDs after each turn.
 
-### Default project and branch bootstrap
+### Project and branch bootstrap
 
 | Entity | Default | How created |
 |--------|---------|-------------|
-| Project | name: `"Default Project"` | `getOrCreateDefaultProject()` on workspace load |
-| Root branch | title: `"Main"`, purpose: `"Main project conversation"`, `parent_branch_id IS NULL` | `getOrCreateMainBranch()` for that project (finds/creates by `parent_branch_id IS NULL`) |
+| Project | — | `POST /api/projects` from Projects page |
+| Root branch | title: `"Main"`, purpose: `"Main project conversation"` | Created with each new project (`getOrCreateMainBranch`) |
 | User branches | title + purpose from form | `POST /api/branches`; parent = current branch unless specified |
 
 **Root branch identification:** The project root is the branch where `parentBranchId === null` (D1: `parent_branch_id IS NULL`). The default title is `"Main"`, but protection logic (e.g. cannot close) uses `isRootBranch()`, not the title string.
@@ -1412,13 +1503,14 @@ This tooling is intentionally **out of scope** for the artifact registry milesto
 
 | Limitation | Notes |
 |------------|-------|
-| Single default project only | No project picker or multi-project UI |
+| Single default project only | **Resolved** — multi-project home screen; no auto default |
 | No LLM closure packets | `closure_summary` not populated on close |
 | `ready_to_close` unused | Branches in this status would not appear in active or closed lists |
 | Closed branch metadata edit UI | API allows PATCH on closed branches; UI disables edit when `isReadOnly` |
 | No create-from-message | `source_message_id` column unused |
 | No branch context seeding | `context_summary` unused; new branches have empty chat |
-| Active branch in localStorage only | No URL deep links; cleared if stale |
+| Branch selection in localStorage only | Within a project; cleared when switching projects |
+| No project search, tags, templates, or settings | Deferred |
 | All messages loaded per branch | No pagination |
 | No auth | Single shared D1 workspace for all visitors |
 | User message persisted before AI | If AI fails, user message remains without assistant reply |
@@ -1439,4 +1531,4 @@ See [Intentionally out of scope](#intentionally-out-of-scope) for deferred produ
 
 ---
 
-*Last updated: artifact registry backend on `feature/artifact-registry`.*
+*Last updated: project management home screen on `feature/projects`.*

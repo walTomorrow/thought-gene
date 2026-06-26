@@ -3,6 +3,7 @@ import { artifactRoutes } from "./routes/artifacts";
 import { branchRoutes } from "./routes/branches";
 import { chatRoutes } from "./routes/chat";
 import { mergeRoutes } from "./routes/merges";
+import { projectRoutes } from "./routes/projects";
 import { workspaceRoutes } from "./routes/workspace";
 import type { WorkerEnv } from "./types/env";
 
@@ -13,6 +14,7 @@ import type { WorkerEnv } from "./types/env";
 const app = new Hono<{ Bindings: WorkerEnv }>();
 
 app.route("/api", workspaceRoutes);
+app.route("/api", projectRoutes);
 app.route("/api", branchRoutes);
 app.route("/api", mergeRoutes);
 app.route("/api", artifactRoutes);

@@ -1,14 +1,18 @@
 import type { WorkspaceResponse } from "../../shared/workspace";
 
 /**
- * Loads the default project, branch list, selected branch, and persisted messages.
+ * Loads a project workspace: branch list, selected branch, and persisted messages.
  */
-export async function fetchWorkspace(branchId?: string): Promise<WorkspaceResponse> {
-  const url = branchId
-    ? `/api/workspace?branchId=${encodeURIComponent(branchId)}`
-    : "/api/workspace";
+export async function fetchWorkspace(
+  projectId: string,
+  branchId?: string,
+): Promise<WorkspaceResponse> {
+  const params = new URLSearchParams({ projectId });
+  if (branchId) {
+    params.set("branchId", branchId);
+  }
 
-  const response = await fetch(url);
+  const response = await fetch(`/api/workspace?${params}`);
 
   const data = (await response.json()) as WorkspaceResponse | { error: string };
 
