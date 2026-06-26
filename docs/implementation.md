@@ -380,7 +380,19 @@ Types live in `shared/workspace.ts`, `shared/chat.ts`, `shared/merge.ts`, `share
 3. `GET /api/workspace?projectId=` loads branches, selected branch, and messages.
 4. **← Projects** in the workspace header returns to the home screen.
 
-No automatic **Default Project** is created. An empty database shows the Projects empty state.
+No automatic **Default Project** is created. An empty database shows the Projects empty state (see below).
+
+### Empty Projects page
+
+When there are no projects:
+
+- Header shows only the **Thought Gene** brand (no nav tab label).
+- **New Project** is hidden in the header to avoid duplicating the primary CTA.
+- A larger centered empty-state panel invites the user with **Create your first project** as the sole action.
+
+When at least one project exists, the header shows **New Project** on the right as usual.
+
+Populated layout uses a wider content column (`72rem`, matching the workspace) and a more prominent **Continue Working** hero card (larger type, gradient panel, stronger shadow). The empty-state layout stays narrower and centered.
 
 ### Project deletion behavior
 

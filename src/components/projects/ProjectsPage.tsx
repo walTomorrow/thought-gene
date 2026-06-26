@@ -68,8 +68,12 @@ export function ProjectsPage({ onOpenProject }: ProjectsPageProps) {
     }
   }
 
+  const hasProjects = !isLoading && projects.length > 0;
+
   return (
-    <div className="projects-page">
+    <div
+      className={`projects-page${hasProjects ? " projects-page--populated" : ""}`}
+    >
       <header className="projects-header">
         <div className="projects-brand">
           <span className="projects-brand-mark" aria-hidden="true">
@@ -77,16 +81,15 @@ export function ProjectsPage({ onOpenProject }: ProjectsPageProps) {
           </span>
           <span className="projects-brand-name">Thought Gene</span>
         </div>
-        <nav className="projects-nav" aria-label="Primary">
-          <span className="projects-nav-active">Projects</span>
-        </nav>
-        <button
-          type="button"
-          className="project-btn project-btn-primary"
-          onClick={() => setCreateOpen(true)}
-        >
-          New Project
-        </button>
+        {!isLoading && projects.length > 0 && (
+          <button
+            type="button"
+            className="project-btn project-btn-primary projects-header-action"
+            onClick={() => setCreateOpen(true)}
+          >
+            New Project
+          </button>
+        )}
       </header>
 
       {error && (
@@ -108,19 +111,21 @@ export function ProjectsPage({ onOpenProject }: ProjectsPageProps) {
       )}
 
       {!isLoading && projects.length === 0 && (
-        <div className="projects-empty">
-          <h2>Welcome to Thought Gene</h2>
-          <p>
-            Create your first project to start branching ideas, merging work, and
-            building project memory.
-          </p>
-          <button
-            type="button"
-            className="project-btn project-btn-primary"
-            onClick={() => setCreateOpen(true)}
-          >
-            Create your first project
-          </button>
+        <div className="projects-empty-wrap">
+          <div className="projects-empty">
+            <h2>Welcome to Thought Gene</h2>
+            <p>
+              Create your first project to start branching ideas, merging work,
+              and building project memory.
+            </p>
+            <button
+              type="button"
+              className="project-btn project-btn-primary projects-empty-cta"
+              onClick={() => setCreateOpen(true)}
+            >
+              Create your first project
+            </button>
+          </div>
         </div>
       )}
 
